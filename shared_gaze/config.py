@@ -8,17 +8,82 @@ MODELS_DIR = PROJECT_ROOT / "models"
 APP_RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", PROJECT_ROOT))
 
 
-def _relay_urls_from_env() -> list[str]:
-    raw_urls = os.environ.get("GAZE_GAME_RELAY_URLS")
-    if raw_urls:
-        return [item.strip() for item in raw_urls.replace(";", ",").split(",") if item.strip()]
-    raw_url = os.environ.get("GAZE_GAME_RELAY_URL")
-    if raw_url:
-        return [raw_url.strip()]
+def _parse_relay_urls(value: str) -> list[str]:
+    return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
+
+
+def _relay_urls_from_text(text: str) -> list[str]:
+    urls: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if line:
+            urls.extend(_parse_relay_urls(line))
+    return urls
+
+
+def _app_bundle_path() -> Path | None:
+    if not getattr(sys, "frozen", False):
+        return None
+    executable = Path(sys.executable).resolve()
+    for parent in executable.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def _relay_url_config_paths() -> list[Path]:
+    paths: list[Path] = []
+    app_bundle = _app_bundle_path()
+    if app_bundle is not None:
+        paths.extend(
+            [
+                app_bundle.parent / "relay_urls.txt",
+                app_bundle.parent / "Gaze Game Relay URLs.txt",
+                app_bundle / "Contents" / "Resources" / "relay_urls.txt",
+            ]
+        )
+
+    paths.extend(
+        [
+            PROJECT_ROOT / "relay_urls.local.txt",
+            PROJECT_ROOT / "relay_urls.txt",
+            Path.home() / "Library" / "Application Support" / "Gaze Game" / "relay_urls.txt",
+        ]
+    )
+
+    unique_paths: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique_paths.append(path)
+    return unique_paths
+
+
+def _relay_urls_from_config_files() -> list[str]:
+    for path in _relay_url_config_paths():
+        try:
+            urls = _relay_urls_from_text(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+        if urls:
+            return urls
     return []
 
 
-DEFAULT_RELAY_URLS = _relay_urls_from_env() or [
+def _relay_urls_from_env() -> list[str]:
+    raw_urls = os.environ.get("GAZE_GAME_RELAY_URLS")
+    if raw_urls:
+        return _parse_relay_urls(raw_urls)
+    raw_url = os.environ.get("GAZE_GAME_RELAY_URL")
+    if raw_url:
+        return _parse_relay_urls(raw_url)
+    return []
+
+
+DEFAULT_RELAY_URLS = _relay_urls_from_env() or _relay_urls_from_config_files() or [
     "ws://127.0.0.1:8765",
 ]
 DEFAULT_RELAY_URL = DEFAULT_RELAY_URLS[0]

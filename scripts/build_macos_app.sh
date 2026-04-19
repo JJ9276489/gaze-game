@@ -22,6 +22,7 @@ python -m PyInstaller --clean --noconfirm gaze_game.spec
 
 APP_PATH="dist/Gaze Game.app"
 ZIP_PATH="dist/Gaze-Game-alpha-macos-arm64.zip"
+PACKAGE_DIR="dist/Gaze-Game-alpha-macos-arm64"
 
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$APP_PATH"
@@ -33,8 +34,16 @@ if command -v codesign >/dev/null 2>&1; then
     "$APP_PATH"
 fi
 
+rm -rf "$PACKAGE_DIR"
+mkdir -p "$PACKAGE_DIR"
+ditto "$APP_PATH" "$PACKAGE_DIR/Gaze Game.app"
+cp packaging/alpha/README-FIRST.txt "$PACKAGE_DIR/README-FIRST.txt"
+if [[ -f relay_urls.local.txt ]]; then
+  cp relay_urls.local.txt "$PACKAGE_DIR/relay_urls.txt"
+fi
+
 rm -f "$ZIP_PATH"
-ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+ditto -c -k --keepParent "$PACKAGE_DIR" "$ZIP_PATH"
 
 echo "Built $APP_PATH"
 echo "Packaged $ZIP_PATH"
