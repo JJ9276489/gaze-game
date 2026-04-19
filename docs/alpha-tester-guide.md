@@ -28,7 +28,7 @@ Tailscale also has official Mac install docs:
 
 1. Unzip `Gaze-Game-alpha-macos-arm64.zip`.
 2. Open the unzipped folder.
-3. Keep `relay_urls.txt` next to `Gaze Game.app` if that file is included.
+3. Do not drag individual files somewhere else.
 4. Right-click `Gaze Game.app`.
 5. Click Open.
 6. If macOS asks whether you are sure, click Open again.
@@ -60,7 +60,7 @@ appear in the room.
 `Relay unavailable`
 
 The app cannot reach the relay. Make sure Tailscale is connected, and make sure
-`relay_urls.txt` is still next to `Gaze Game.app` if the organizer included one.
+you opened the app from the original unzipped folder.
 
 `Camera unavailable`
 

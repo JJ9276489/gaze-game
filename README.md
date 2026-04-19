@@ -38,8 +38,8 @@ Do not expose the included unauthenticated relay directly to the public internet
 public testing, put it behind TLS and add authentication, rate limits, room limits, and
 basic abuse controls first.
 
-Packaged alpha builds can also be configured without Terminal. Put a `relay_urls.txt`
-file next to `Gaze Game.app`:
+Packaged alpha builds can also be configured without Terminal. The build script can put a
+`relay_urls.txt` file in the same unzipped folder as `Gaze Game.app`:
 
 ```text
 Gaze-Game-alpha-macos-arm64/
@@ -141,8 +141,9 @@ dist/Gaze-Game-alpha-macos-arm64.zip
 ```
 
 If an ignored `relay_urls.local.txt` file exists, the build script copies it into the zip
-as `relay_urls.txt`, next to `Gaze Game.app`. This is the intended way to send a
-preconfigured private alpha build to non-technical testers.
+as `relay_urls.txt` in the same folder as `Gaze Game.app`. This is the intended way to
+send a preconfigured private alpha build to non-technical testers. The user-facing
+instructions should simply say to unzip the folder and open the app from there.
 
 This local build is for Apple Silicon Macs and is not Developer ID notarized. Testers may
 need to right-click `Gaze Game.app` and choose Open the first time.

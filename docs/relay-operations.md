@@ -40,7 +40,8 @@ python gaze_game.py --server ws://relay-host.example:8765
 
 For packaged alpha builds, put relay URLs in `relay_urls.local.txt` before running the
 macOS build script. The script copies that ignored local file into the alpha zip as
-`relay_urls.txt`, next to `Gaze Game.app`, so testers do not need Terminal.
+`relay_urls.txt` in the same unzipped folder as `Gaze Game.app`, so testers do not need
+Terminal.
 
 ## Production Requirements
 

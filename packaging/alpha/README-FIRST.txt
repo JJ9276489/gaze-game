@@ -1,13 +1,9 @@
 Gaze Game Alpha Test
 ====================
 
-Keep these files together:
+After unzipping, you will get a folder named Gaze-Game-alpha-macos-arm64.
 
-- Gaze Game.app
-- relay_urls.txt, if it is included
-
-Do not move relay_urls.txt inside the app. It should stay in this same folder as
-Gaze Game.app.
+Open Gaze Game from that folder. Do not drag individual files somewhere else.
 
 If You Are Testing Remotely
 ---------------------------
@@ -53,8 +49,8 @@ If It Does Not Work
 -------------------
 
 Relay unavailable:
-The relay is unreachable. Make sure Tailscale is connected and relay_urls.txt is still
-next to Gaze Game.app.
+The relay is unreachable. Make sure Tailscale is connected. If you moved Gaze Game.app
+out of the unzipped folder, unzip the original file again and open it from that folder.
 
 Camera unavailable:
 Open System Settings > Privacy & Security > Camera and enable Gaze Game. Then reopen
