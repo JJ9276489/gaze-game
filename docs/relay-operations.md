@@ -24,8 +24,9 @@ For a local multi-user smoke test, open a second tab, join the same room, and en
 `Mouse mode` under `Connection`.
 
 The room itself is a hangout. Dojo, Trial, and Solo are local runs. Multiplayer starts a
-room-visible wave with cursor broadcasting, but enemy spawn synchronization and score
-events are not relay protocol yet.
+room-visible wave. The relay stores one active wave per room, broadcasts `wave_start` to
+everyone in that room, includes the active wave in `welcome` for late joiners, and
+broadcasts sanitized `wave_score` updates after clients send `wave_hit`.
 
 ## Private Alpha Deployment
 
@@ -74,6 +75,7 @@ add:
 - max clients per room
 - idle timeout cleanup
 - structured logs and basic metrics
+- authoritative wave scoring or explicit anti-cheat boundaries
 - abuse reporting or operator controls
 - explicit data-collection consent before accepting webcam-derived training data
 

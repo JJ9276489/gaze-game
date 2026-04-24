@@ -13,7 +13,8 @@ This guide is for browser testers. You should not need Terminal, Python, or a na
 
 1. Open the HTTPS URL from the organizer.
 2. Enter your name.
-3. Click `Create room`, or enter a room code and click `Join room`.
+3. Click `Dojo` if you want to train before joining friends, or click `Create room` /
+   enter a room code and click `Join room`.
 4. Allow camera access when the browser asks.
 5. Click `Calibrate`.
 6. Use the fullscreen prompt or click `Full screen`.
@@ -28,7 +29,7 @@ room, you should see their cursor too.
 2. Defeat the training dummies by looking at them until the run finishes.
 3. Click `Trial` to measure held-out accuracy.
 4. Click `Solo` to play your own enemy wave.
-5. Click `Multiplayer` to play a room-visible wave.
+5. Join or create a room, then click `Multiplayer` to start a synchronized room wave.
 
 Dojo training is local to your browser. Other people in the room do not receive your
 webcam data, training samples, or personal model.

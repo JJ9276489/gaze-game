@@ -173,6 +173,7 @@ const CHALLENGE_DURATION_MS = 30000;
 const CHALLENGE_TARGET_RADIUS_PX = 34;
 const CHALLENGE_DWELL_MS = 240;
 const WAVE_MODES = new Set(["solo", "multiplayer"]);
+const WAVE_TARGET_COUNT = 96;
 
 const $ = (id) => document.getElementById(id);
 
@@ -182,6 +183,7 @@ const elements = {
   lobby: $("lobby"),
   hud: $("hud"),
   form: $("joinForm"),
+  dojoButton: $("dojoButton"),
   createButton: $("createButton"),
   joinButton: $("joinButton"),
   trainButton: $("trainButton"),
@@ -254,6 +256,8 @@ const state = {
   trainingSamples: loadTrainingSamples(),
   personalModels: loadPersonalModels(),
   trainerSession: null,
+  waveScores: new Map(),
+  pendingWave: null,
   controlsHidden: loadControlsHidden(),
   processingCanvas: document.createElement("canvas"),
   processingFrameData: null,
@@ -291,6 +295,9 @@ function init() {
     event.preventDefault();
     void startSession(false);
   });
+  elements.dojoButton.addEventListener("click", () => {
+    void startLocalDojoSession();
+  });
   elements.createButton.addEventListener("click", () => {
     elements.roomInput.value = generateRoomCode();
     void startSession(true);
@@ -313,7 +320,7 @@ function init() {
     void startTrainerRun("solo");
   });
   elements.multiplayerButton.addEventListener("click", () => {
-    void startTrainerRun("multiplayer");
+    void requestMultiplayerWaveFromUser();
   });
   elements.resetPersonalButton.addEventListener("click", resetCurrentPersonalModel);
   elements.calibrateButton.addEventListener("click", () => {
@@ -331,6 +338,39 @@ function init() {
   document.addEventListener("webkitfullscreenchange", refreshFullscreenButton);
 
   drawLoop();
+}
+
+async function startLocalDojoSession() {
+  setBusy(true);
+  hideToast();
+  state.source = "gaze";
+  elements.mouseModeInput.checked = false;
+
+  const name = (elements.nameInput.value || "Guest").trim().slice(0, 32) || "Guest";
+  state.local.name = name;
+  state.local.room = "DOJO";
+  state.local.color = colorForName(name);
+  elements.roomLabel.textContent = "DOJO";
+  elements.roomLabel.title = "Local Dojo";
+  elements.nameLabel.textContent = name;
+  localStorage.setItem("gazeGame.name", name);
+
+  try {
+    setStatus("Starting Dojo");
+    await startGazeSource();
+    state.connected = false;
+    state.running = true;
+    showHud();
+    showToast("Dojo ready. Calibrate, then start Dojo.");
+    window.setTimeout(hideToast, 1800);
+  } catch (error) {
+    stopSession();
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus("Could not start Dojo");
+    showToast(message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function startSession(createRoom) {
@@ -370,6 +410,11 @@ async function startSession(createRoom) {
     showHud();
     state.running = true;
     startSending();
+    if (state.pendingWave) {
+      const wave = state.pendingWave;
+      state.pendingWave = null;
+      handleWaveStart(wave);
+    }
     if (state.source === "gaze" && !hasAnyCalibrationMapping()) {
       showToast("Click Calibrate and keep the page fullscreen for best results.");
     }
@@ -387,6 +432,7 @@ function stopSession() {
   state.running = false;
   state.connected = false;
   state.peers.clear();
+  state.waveScores.clear();
   window.clearInterval(state.sendTimer);
   state.sendTimer = 0;
   window.cancelAnimationFrame(state.cameraFrame);
@@ -413,6 +459,7 @@ function stopSession() {
 }
 
 function setBusy(isBusy) {
+  elements.dojoButton.disabled = isBusy;
   elements.createButton.disabled = isBusy;
   elements.joinButton.disabled = isBusy;
 }
@@ -950,7 +997,41 @@ function trainerTargetNoun(mode) {
   return "enemy";
 }
 
-async function startTrainerRun(mode) {
+async function requestMultiplayerWaveFromUser() {
+  if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    showToast("Join or create a room before starting multiplayer.");
+    return;
+  }
+  if (state.source !== "gaze" || !state.running) {
+    return;
+  }
+  if (!state.rawReading?.tracking) {
+    showToast("Wait for face tracking first.");
+    return;
+  }
+
+  const kind = state.rawReading.kind || state.modelKey;
+  if (!state.personalModels[kind]) {
+    showToast("Enter the Dojo and train your personal NN first.");
+    return;
+  }
+
+  hideToast();
+  await maybeEnterFullscreen();
+  const seed = createWaveSeed();
+  state.ws.send(
+    JSON.stringify({
+      type: "wave_start",
+      room: state.local.room,
+      seed,
+      duration_ms: CHALLENGE_DURATION_MS,
+      targets: makeEnemyTargets(seed, WAVE_TARGET_COUNT),
+      ts: Date.now(),
+    }),
+  );
+}
+
+async function startTrainerRun(mode, options = {}) {
   if (state.source !== "gaze" || !state.running) {
     return;
   }
@@ -960,7 +1041,9 @@ async function startTrainerRun(mode) {
   }
 
   hideToast();
-  await maybeEnterFullscreen();
+  if (!options.skipFullscreen) {
+    await maybeEnterFullscreen();
+  }
   cancelCalibration(false);
 
   const kind = state.rawReading.kind || state.modelKey;
@@ -969,21 +1052,36 @@ async function startTrainerRun(mode) {
     return;
   }
   const now = performance.now();
+  const wave = options.wave || null;
+  const durationMs = Number(wave?.durationMs) || CHALLENGE_DURATION_MS;
+  const remainingMs =
+    isWaveMode(mode) && Number.isFinite(wave?.startedAt)
+      ? Math.max(1000, wave.startedAt + durationMs - Date.now())
+      : durationMs;
   const targets =
     isWaveMode(mode)
-      ? [randomEnemyTarget()]
+      ? normalizedWaveTargets(wave?.targets).length
+        ? normalizedWaveTargets(wave.targets)
+        : makeEnemyTargets(wave?.seed || createWaveSeed(), WAVE_TARGET_COUNT)
       : shuffledTargets(mode === "trial" ? EVAL_TARGETS : TRAIN_TARGETS);
 
+  state.waveScores.clear();
+  for (const score of wave?.scores || []) {
+    state.waveScores.set(score.id, score);
+  }
   state.trainerSession = {
     active: true,
     mode,
     kind,
+    waveId: wave?.id || `solo-${Date.now()}`,
+    seed: wave?.seed || "",
     targets,
     stepIndex: 0,
     phase: isWaveMode(mode) ? "active" : "settle",
     phaseStartedAt: now,
     startedAt: now,
-    endsAt: isWaveMode(mode) ? now + CHALLENGE_DURATION_MS : 0,
+    endsAt: isWaveMode(mode) ? now + remainingMs : 0,
+    durationMs,
     samples: [],
     capturedSamples: [],
     errors: [],
@@ -1094,7 +1192,11 @@ function updateWaveRun(session, point) {
     return;
   }
 
-  const target = visibleOverlayTarget(session.targets[0], ".trainer-dock");
+  const target = currentTrainerTarget(session);
+  if (!target) {
+    finishTrainerRun(session);
+    return;
+  }
   const errorPx = distanceToTargetPx(point, target);
   session.lastErrorPx = errorPx;
   if (errorPx <= CHALLENGE_TARGET_RADIUS_PX) {
@@ -1103,7 +1205,10 @@ function updateWaveRun(session, point) {
     }
     if (now - session.dwellStartedAt >= CHALLENGE_DWELL_MS) {
       session.score += 1;
-      session.targets = [randomEnemyTarget(target)];
+      if (session.mode === "multiplayer") {
+        sendWaveHit(session, target);
+      }
+      session.stepIndex += 1;
       session.dwellStartedAt = 0;
       session.phaseStartedAt = now;
     }
@@ -1115,6 +1220,35 @@ function updateWaveRun(session, point) {
     session.lastUiAt = now;
     refreshTrainerOverlay();
   }
+}
+
+function currentTrainerTarget(session) {
+  if (!session?.targets?.length) {
+    return null;
+  }
+  if (isWaveMode(session.mode)) {
+    return visibleOverlayTarget(
+      session.targets[session.stepIndex % session.targets.length],
+      ".trainer-dock",
+    );
+  }
+  return visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
+}
+
+function sendWaveHit(session, target) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.connected) {
+    return;
+  }
+  state.ws.send(
+    JSON.stringify({
+      type: "wave_hit",
+      room: state.local.room,
+      wave_id: session.waveId,
+      target_id: target?.id || "",
+      score: session.score,
+      ts: Date.now(),
+    }),
+  );
 }
 
 function finishTrainerRun(session) {
@@ -1202,7 +1336,7 @@ function refreshTrainerOverlay() {
   elements.trainerOverlay.classList.remove("hidden");
   if (isWaveMode(session.mode)) {
     const secondsLeft = Math.max(0, Math.ceil((session.endsAt - performance.now()) / 1000));
-    const progress = clamp01((performance.now() - session.startedAt) / CHALLENGE_DURATION_MS);
+    const progress = clamp01((performance.now() - session.startedAt) / session.durationMs);
     elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
     elements.trainerStep.textContent = `${trainerModeLabel(session.mode)} · ${secondsLeft}s`;
     elements.trainerTitle.textContent = `${session.score} takedowns`;
@@ -1302,6 +1436,7 @@ function connectRelay() {
       if (message.type === "welcome") {
         state.local.id = message.id;
         state.connected = true;
+        state.pendingWave = normalizeRelayWave(message.wave);
         state.peers.clear();
         for (const peer of message.peers || []) {
           state.peers.set(peer.id, {
@@ -1387,6 +1522,65 @@ function handleRelayMessage(message) {
     peer.tracking = Boolean(message.tracking) && hasCoordinates;
     peer.lastSeen = performance.now();
     state.peers.set(message.id, peer);
+    return;
+  }
+
+  if (message.type === "wave_start") {
+    handleWaveStart(normalizeRelayWave(message));
+    return;
+  }
+
+  if (message.type === "wave_score") {
+    handleWaveScore(message);
+  }
+}
+
+function handleWaveStart(wave) {
+  if (!wave) {
+    return;
+  }
+  if (state.trainerSession?.active) {
+    if (state.trainerSession.waveId !== wave.id) {
+      showToast(`${wave.startedByName || "A player"} started a wave.`);
+      window.setTimeout(hideToast, 1600);
+    }
+    return;
+  }
+  if (!state.running || state.source !== "gaze") {
+    return;
+  }
+  const kind = state.rawReading?.kind || state.modelKey;
+  if (!state.personalModels[kind]) {
+    showToast("Multiplayer wave started. Finish Dojo training to join waves.");
+    window.setTimeout(hideToast, 2200);
+    return;
+  }
+  if (!state.rawReading?.tracking) {
+    showToast("Multiplayer wave started. Wait for face tracking, then start the next wave.");
+    window.setTimeout(hideToast, 2200);
+    return;
+  }
+  void startTrainerRun("multiplayer", { wave, skipFullscreen: true });
+}
+
+function handleWaveScore(message) {
+  const session = state.trainerSession;
+  if (!session?.active || session.mode !== "multiplayer" || message.wave_id !== session.waveId) {
+    return;
+  }
+  const id = String(message.id || "");
+  if (!id) {
+    return;
+  }
+  const score = {
+    id,
+    name: message.name || "Guest",
+    color: Array.isArray(message.color) ? message.color : [255, 255, 255],
+    score: Math.max(0, Number(message.score) || 0),
+  };
+  state.waveScores.set(id, score);
+  if (id === state.local.id) {
+    session.score = score.score;
   }
 }
 
@@ -1459,6 +1653,7 @@ function drawStage() {
   }
   if (state.trainerSession?.active) {
     drawTrainerTarget(w, h);
+    drawWaveLeaderboard(w, h);
   }
 }
 
@@ -1514,6 +1709,62 @@ function drawCursor(x, y, color, label, alpha, isLocal) {
   ctx.restore();
 }
 
+function drawWaveLeaderboard(width, height) {
+  const session = state.trainerSession;
+  if (!session?.active || session.mode !== "multiplayer") {
+    return;
+  }
+
+  const scores = new Map(state.waveScores);
+  scores.set(state.local.id, {
+    id: state.local.id,
+    name: state.local.name,
+    color: state.local.color,
+    score: session.score,
+  });
+  const rows = [...scores.values()]
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  if (!rows.length) {
+    return;
+  }
+
+  const panelWidth = Math.min(240, Math.max(180, width * 0.22));
+  const rowHeight = 24;
+  const panelHeight = 34 + rows.length * rowHeight;
+  const x = Math.max(12, width - panelWidth - 16);
+  const y = 88;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(5, 8, 13, 0.58)";
+  ctx.strokeStyle = "rgba(122, 170, 255, 0.22)";
+  ctx.lineWidth = 1;
+  roundRect(ctx, x, y, panelWidth, panelHeight, 8);
+  ctx.fill();
+  ctx.stroke();
+  ctx.font = "700 11px Inter, ui-sans-serif, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(117, 216, 255, 0.95)";
+  ctx.textBaseline = "middle";
+  ctx.fillText("WAVE SCORE", x + 12, y + 17);
+
+  rows.forEach((row, index) => {
+    const rowY = y + 36 + index * rowHeight;
+    const rgb = row.color || [255, 255, 255];
+    ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.95)`;
+    ctx.beginPath();
+    ctx.arc(x + 14, rowY - 1, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(238, 243, 255, 0.92)";
+    ctx.font = "600 13px Inter, ui-sans-serif, system-ui, sans-serif";
+    const name = row.id === state.local.id ? "You" : row.name || "Guest";
+    ctx.fillText(name, x + 26, rowY);
+    ctx.textAlign = "right";
+    ctx.fillText(String(row.score), x + panelWidth - 12, rowY);
+    ctx.textAlign = "left";
+  });
+  ctx.restore();
+}
+
 function roundRect(context, x, y, width, height, radius) {
   context.beginPath();
   context.moveTo(x + radius, y);
@@ -1566,7 +1817,7 @@ function drawTrainerTarget(width, height) {
   if (!session?.active) {
     return;
   }
-  const target = visibleOverlayTarget(session.targets[session.stepIndex] || session.target, ".trainer-dock");
+  const target = currentTrainerTarget(session);
   if (!target) {
     return;
   }
@@ -2485,19 +2736,95 @@ function shuffledTargets(targets) {
   return copy;
 }
 
-function randomEnemyTarget(previous) {
-  let target = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    target = {
-      id: `enemy-${Date.now()}-${attempt}`,
-      x: 0.12 + Math.random() * 0.76,
-      y: 0.14 + Math.random() * 0.62,
-    };
-    if (!previous || Math.hypot(target.x - previous.x, target.y - previous.y) > 0.28) {
-      break;
+function createWaveSeed() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function makeEnemyTargets(seed, count) {
+  const random = seededRandom(seed || createWaveSeed());
+  const targets = [];
+  let previous = null;
+  for (let index = 0; index < count; index += 1) {
+    let target = null;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      target = {
+        id: `enemy-${index}`,
+        x: 0.12 + random() * 0.76,
+        y: 0.14 + random() * 0.62,
+      };
+      if (!previous || Math.hypot(target.x - previous.x, target.y - previous.y) > 0.25) {
+        break;
+      }
     }
+    targets.push(target);
+    previous = target;
   }
-  return target;
+  return targets;
+}
+
+function seededRandom(seed) {
+  let value = hashSeed(seed);
+  return () => {
+    value += 0x6d2b79f5;
+    let next = value;
+    next = Math.imul(next ^ (next >>> 15), next | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashSeed(seed) {
+  let hash = 2166136261;
+  for (let index = 0; index < String(seed).length; index += 1) {
+    hash ^= String(seed).charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function normalizeRelayWave(message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const seed = String(message.seed || createWaveSeed());
+  const targets = normalizedWaveTargets(message.targets);
+  return {
+    id: String(message.id || message.wave_id || `wave-${seed}`),
+    seed,
+    targets: targets.length ? targets : makeEnemyTargets(seed, WAVE_TARGET_COUNT),
+    startedAt: Number(message.started_at) || Number(message.server_ts) || Date.now(),
+    durationMs: Math.max(1000, Number(message.duration_ms) || CHALLENGE_DURATION_MS),
+    startedBy: message.started_by || "",
+    startedByName: message.started_by_name || "A player",
+    scores: normalizeWaveScores(message.scores),
+  };
+}
+
+function normalizedWaveTargets(targets) {
+  if (!Array.isArray(targets)) {
+    return [];
+  }
+  return targets
+    .map((target, index) => ({
+      id: String(target?.id || `enemy-${index}`),
+      x: clamp01(target?.x),
+      y: clamp01(target?.y),
+    }))
+    .filter((target) => Number.isFinite(target.x) && Number.isFinite(target.y));
+}
+
+function normalizeWaveScores(scores) {
+  if (!Array.isArray(scores)) {
+    return [];
+  }
+  return scores
+    .map((score) => ({
+      id: String(score?.id || ""),
+      name: score?.name || "Guest",
+      color: Array.isArray(score?.color) ? score.color : [255, 255, 255],
+      score: Math.max(0, Number(score?.score) || 0),
+    }))
+    .filter((score) => score.id);
 }
 
 function shuffleInPlace(items, random) {

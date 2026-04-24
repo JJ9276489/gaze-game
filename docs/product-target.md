@@ -3,23 +3,23 @@
 The end-user version should not require Terminal, Python, native app installation, or
 self-hosting.
 
-The current product skin is Gaze Ninja: room hangout first, then opt-in Dojo, Solo, or
-Multiplayer enemy waves.
+The current product skin is Gaze Ninja: train alone in the Dojo first, then bring that
+personal model into a room hangout for Solo or Multiplayer enemy waves.
 
 ## User Flow
 
 1. User opens a hosted HTTPS URL.
 2. The browser asks for Camera permission.
 3. User enters a display name.
-4. User chooses `Create Room` or `Join Room`.
-5. `Create Room` shows a short code like `K7M-4QX`.
-6. Another user enters that room code.
-7. User clicks `Calibrate` and looks at five fullscreen targets.
-8. User can click `Dojo` to collect local samples and fit a personal adapter.
-9. User can click `Trial` for held-out accuracy, `Solo` for local waves, or `Multiplayer`
-   for room-visible waves.
-10. Both clients connect to the hosted relay over `wss://`.
-11. Each browser runs gaze inference locally with the ONNX-exported model and sends only
+4. User chooses `Dojo`, `Join room`, or `Create room`.
+5. `Dojo` starts a local camera session for calibration, sample collection, and fitting a
+   personal adapter without joining the relay.
+6. `Create room` shows a short code like `K7M-4QX`.
+7. Another user enters that room code and clicks `Join room`.
+8. Users can click `Trial` for held-out accuracy, `Solo` for local waves, or
+   `Multiplayer` for synchronized room-visible waves.
+9. Room clients connect to the hosted relay over `wss://`.
+10. Each browser runs gaze inference locally with the ONNX-exported model and sends only
    cursor coordinates.
 
 For local development, the default relay is:
@@ -98,6 +98,7 @@ Allowed:
 - cursor color
 - normalized cursor coordinates
 - tracking status
+- multiplayer wave seed, target coordinates, and score updates
 - timestamps and sequence counters
 
 Not allowed:

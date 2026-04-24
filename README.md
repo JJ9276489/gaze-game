@@ -11,11 +11,11 @@ and players opt into game runs when they are ready:
 
 1. Open the shared URL.
 2. Enter a name.
-3. Create or join a room.
+3. Enter the Dojo to calibrate and train a local personal NN adapter, or create/join a
+   room.
 4. Allow camera access.
 5. Calibrate in fullscreen.
-6. Enter the Dojo to train a local personal NN adapter.
-7. Run a Trial, play Solo, or start a Multiplayer wave.
+6. Run a Trial, play Solo, or start a Multiplayer wave from a room.
 
 ## Project Shape
 
@@ -141,7 +141,8 @@ Game modes:
 - `Dojo` spawns training dummies and uses them as local NN training labels.
 - `Trial` measures held-out accuracy against fixed marks.
 - `Solo` spawns enemy waves locally.
-- `Multiplayer` starts a room-visible wave while still keeping webcam data local.
+- `Multiplayer` starts a synchronized room wave with shared targets and relay-broadcast
+  scores while still keeping webcam data local.
 
 ## Private Remote Run
 

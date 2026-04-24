@@ -15,6 +15,7 @@ or Multiplayer waves spawn enemies as gaze targets.
 - browser-local personal NN adapter training
 - held-out testing and timed target competition
 - hangout rooms with opt-in game waves
+- synchronized multiplayer enemy waves with room-visible scores
 - heuristic fallback if the ONNX model asset is missing
 - mouse mode when camera gaze is unavailable
 
@@ -60,15 +61,16 @@ For a two-client test on one computer:
 
 1. Open the page in one browser tab.
 2. Enter your name.
-3. Click Create room.
+3. Click `Dojo`.
 4. Click `Calibrate` and keep staring at each target until it moves.
-5. Click `Dojo` and complete a dummy run.
+5. Complete a Dojo dummy run.
 6. Click `Trial` to measure the held-out error.
-7. Open the page in a second tab or another browser.
-8. Enter a different name.
-9. Enter the same room code.
-10. Open Connection and enable Mouse mode.
-11. Click Join room.
+7. Click `Leave`, then click `Create room`.
+8. Open the page in a second tab or another browser.
+9. Enter a different name.
+10. Enter the same room code.
+11. Open Connection and enable Mouse mode if you only need to validate networking.
+12. Click Join room.
 
 ## Private Remote Test With Tailscale
 
@@ -115,9 +117,16 @@ One user starting `Dojo` does not start training for anyone else, and the app hi
 user's cursor from peers during Dojo and Trial so stale target movement does not distract
 the room.
 
-`Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` starts a
-room-visible wave and broadcasts only the resulting cursor state. Enemy spawn syncing and
-score events are future relay-level work.
+`Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` sends a
+`wave_start` event to the relay. The relay stores one active wave per room, broadcasts the
+same seed and target list to every player in that room, and includes the active wave in a
+late joiner's welcome message while the wave is still running. Each client still decides
+its own gaze hits locally and sends `wave_hit`; the relay broadcasts sanitized
+`wave_score` updates for the canvas leaderboard.
+
+The current relay is not an authoritative anti-cheat game server. It trusts client score
+events and should stay private until room auth, rate limits, and authoritative scoring are
+designed.
 
 ## Screen Controls
 
