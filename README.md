@@ -1,24 +1,25 @@
-# Gaze Game
+# Gaze Ninja
 
-Browser-based shared gaze rooms.
+Browser-based shared gaze rooms, built as a ninja target game.
 
 Each client estimates gaze locally, renders a cursor on a shared grid, and sends only
 normalized cursor state to a small WebSocket relay. Webcam frames, eye crops, landmarks,
 and model tensors stay on the user's device.
 
-The current product path is a hosted HTTPS browser app:
+The current product path is a hosted HTTPS browser app. The room is a hangout by default,
+and players opt into game runs when they are ready:
 
 1. Open the shared URL.
 2. Enter a name.
 3. Create or join a room.
 4. Allow camera access.
 5. Calibrate in fullscreen.
-6. Train a local personal NN adapter.
-7. Test or compete in the target game.
+6. Enter the Dojo to train a local personal NN adapter.
+7. Run a Trial, play Solo, or start a Multiplayer wave.
 
 ## Project Shape
 
-- `web/` is the browser client.
+- `web/` is the browser client and Gaze Ninja game surface.
 - `shared_gaze/relay_server.py` serves `web/` and relays cursor messages.
 - `scripts/export_browser_onnx.py` exports the local PyTorch gaze checkpoint for browser
   inference.
@@ -134,6 +135,13 @@ Useful in-session controls:
 - `Hide buttons` keeps the room code visible and removes distracting controls.
 - `F` toggles fullscreen.
 - `H` toggles hidden controls.
+
+Game modes:
+
+- `Dojo` spawns training dummies and uses them as local NN training labels.
+- `Trial` measures held-out accuracy against fixed marks.
+- `Solo` spawns enemy waves locally.
+- `Multiplayer` starts a room-visible wave while still keeping webcam data local.
 
 ## Private Remote Run
 

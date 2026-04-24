@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gaze Game</title>
+    <title>Gaze Ninja</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -14,8 +14,8 @@
       <section id="lobby" class="panel" aria-labelledby="title">
         <div class="panel-header">
           <div>
-            <div class="brand-mark" aria-hidden="true">GG</div>
-            <h1 id="title">Gaze Game</h1>
+            <div class="brand-mark" aria-hidden="true">GN</div>
+            <h1 id="title">Gaze Ninja</h1>
           </div>
           <div id="secureBadge" class="badge">Camera ready</div>
         </div>
@@ -37,9 +37,9 @@
           </div>
 
           <div class="flow-strip" aria-label="Game loop">
-            <span>Train</span>
-            <span>Test</span>
-            <span>Compete</span>
+            <span>Dojo</span>
+            <span>Solo</span>
+            <span>Multiplayer</span>
           </div>
 
           <details class="advanced">
@@ -106,9 +106,10 @@
             >Hide buttons</button>
           </div>
           <div id="hudActionButtons" class="hud-actions">
-            <button id="trainButton" class="primary-action" type="button">Train NN</button>
-            <button id="evaluateButton" class="secondary-action" type="button">Test</button>
-            <button id="challengeButton" class="secondary-action" type="button">Compete</button>
+            <button id="trainButton" class="primary-action" type="button">Dojo</button>
+            <button id="evaluateButton" class="secondary-action" type="button">Trial</button>
+            <button id="challengeButton" class="secondary-action" type="button">Solo</button>
+            <button id="multiplayerButton" class="secondary-action" type="button">Multiplayer</button>
             <button id="calibrateButton" class="quiet-action" type="button">Calibrate</button>
             <button id="resetPersonalButton" type="button">Reset NN</button>
             <button id="leaveButton" class="quiet-action" type="button">Leave</button>
@@ -132,7 +133,7 @@
       <section id="trainerOverlay" class="trainer hidden" aria-live="polite">
         <div class="trainer-dock">
           <div class="trainer-copy">
-            <p id="trainerStep" class="calibration-step">Training</p>
+            <p id="trainerStep" class="calibration-step">Dojo</p>
             <h2 id="trainerTitle">Target run</h2>
             <p id="trainerBody" class="calibration-body">Collecting samples.</p>
           </div>

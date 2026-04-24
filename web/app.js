@@ -172,6 +172,7 @@ const EVAL_MIN_SAMPLES_PER_TARGET = 6;
 const CHALLENGE_DURATION_MS = 30000;
 const CHALLENGE_TARGET_RADIUS_PX = 34;
 const CHALLENGE_DWELL_MS = 240;
+const WAVE_MODES = new Set(["solo", "multiplayer"]);
 
 const $ = (id) => document.getElementById(id);
 
@@ -186,6 +187,7 @@ const elements = {
   trainButton: $("trainButton"),
   evaluateButton: $("evaluateButton"),
   challengeButton: $("challengeButton"),
+  multiplayerButton: $("multiplayerButton"),
   calibrateButton: $("calibrateButton"),
   resetPersonalButton: $("resetPersonalButton"),
   leaveButton: $("leaveButton"),
@@ -302,13 +304,16 @@ function init() {
     setControlsHidden(!state.controlsHidden);
   });
   elements.trainButton.addEventListener("click", () => {
-    void startTrainerRun("train");
+    void startTrainerRun("dojo");
   });
   elements.evaluateButton.addEventListener("click", () => {
-    void startTrainerRun("eval");
+    void startTrainerRun("trial");
   });
   elements.challengeButton.addEventListener("click", () => {
-    void startTrainerRun("challenge");
+    void startTrainerRun("solo");
+  });
+  elements.multiplayerButton.addEventListener("click", () => {
+    void startTrainerRun("multiplayer");
   });
   elements.resetPersonalButton.addEventListener("click", resetCurrentPersonalModel);
   elements.calibrateButton.addEventListener("click", () => {
@@ -923,6 +928,28 @@ async function maybeEnterFullscreen() {
   await enterFullscreen(false);
 }
 
+function isWaveMode(mode) {
+  return WAVE_MODES.has(mode);
+}
+
+function isMultiplayerWaveMode(mode) {
+  return mode === "multiplayer";
+}
+
+function trainerModeLabel(mode) {
+  if (mode === "dojo") return "Dojo";
+  if (mode === "trial") return "Trial";
+  if (mode === "solo") return "Solo";
+  if (mode === "multiplayer") return "Multiplayer wave";
+  return "Run";
+}
+
+function trainerTargetNoun(mode) {
+  if (mode === "dojo") return "dummy";
+  if (mode === "trial") return "mark";
+  return "enemy";
+}
+
 async function startTrainerRun(mode) {
   if (state.source !== "gaze" || !state.running) {
     return;
@@ -937,15 +964,15 @@ async function startTrainerRun(mode) {
   cancelCalibration(false);
 
   const kind = state.rawReading.kind || state.modelKey;
-  if ((mode === "eval" || mode === "challenge") && !state.personalModels[kind]) {
-    showToast("Train a personal NN first.");
+  if ((mode === "trial" || isWaveMode(mode)) && !state.personalModels[kind]) {
+    showToast("Enter the Dojo and train your personal NN first.");
     return;
   }
   const now = performance.now();
   const targets =
-    mode === "challenge"
-      ? [randomChallengeTarget()]
-      : shuffledTargets(mode === "eval" ? EVAL_TARGETS : TRAIN_TARGETS);
+    isWaveMode(mode)
+      ? [randomEnemyTarget()]
+      : shuffledTargets(mode === "trial" ? EVAL_TARGETS : TRAIN_TARGETS);
 
   state.trainerSession = {
     active: true,
@@ -953,10 +980,10 @@ async function startTrainerRun(mode) {
     kind,
     targets,
     stepIndex: 0,
-    phase: mode === "challenge" ? "active" : "settle",
+    phase: isWaveMode(mode) ? "active" : "settle",
     phaseStartedAt: now,
     startedAt: now,
-    endsAt: mode === "challenge" ? now + CHALLENGE_DURATION_MS : 0,
+    endsAt: isWaveMode(mode) ? now + CHALLENGE_DURATION_MS : 0,
     samples: [],
     capturedSamples: [],
     errors: [],
@@ -990,16 +1017,16 @@ function updateTrainerRun(reading, point) {
     return;
   }
 
-  if (session.mode === "challenge") {
-    updateChallengeRun(session, point.active);
+  if (isWaveMode(session.mode)) {
+    updateWaveRun(session, point.active);
     return;
   }
 
   const now = performance.now();
-  const settleMs = session.mode === "eval" ? EVAL_SETTLE_MS : TRAIN_SETTLE_MS;
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
+  const settleMs = session.mode === "trial" ? EVAL_SETTLE_MS : TRAIN_SETTLE_MS;
+  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
   const minSamples =
-    session.mode === "eval" ? EVAL_MIN_SAMPLES_PER_TARGET : TRAIN_MIN_SAMPLES_PER_TARGET;
+    session.mode === "trial" ? EVAL_MIN_SAMPLES_PER_TARGET : TRAIN_MIN_SAMPLES_PER_TARGET;
   const target = visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
   if (!target) {
     finishTrainerRun(session);
@@ -1016,7 +1043,7 @@ function updateTrainerRun(reading, point) {
     return;
   }
 
-  if (session.mode === "train") {
+  if (session.mode === "dojo") {
     const sample = createTrainingSample(reading, target, {
       width: window.innerWidth,
       height: window.innerHeight,
@@ -1042,7 +1069,7 @@ function updateTrainerRun(reading, point) {
     return;
   }
 
-  if (session.mode === "train") {
+  if (session.mode === "dojo") {
     session.capturedSamples.push(...session.samples);
   } else {
     session.errors.push(...session.samples);
@@ -1060,7 +1087,7 @@ function updateTrainerRun(reading, point) {
   refreshTrainerOverlay();
 }
 
-function updateChallengeRun(session, point) {
+function updateWaveRun(session, point) {
   const now = performance.now();
   if (now >= session.endsAt) {
     finishTrainerRun(session);
@@ -1076,7 +1103,7 @@ function updateChallengeRun(session, point) {
     }
     if (now - session.dwellStartedAt >= CHALLENGE_DWELL_MS) {
       session.score += 1;
-      session.targets = [randomChallengeTarget(target)];
+      session.targets = [randomEnemyTarget(target)];
       session.dwellStartedAt = 0;
       session.phaseStartedAt = now;
     }
@@ -1093,15 +1120,15 @@ function updateChallengeRun(session, point) {
 function finishTrainerRun(session) {
   state.trainerSession = null;
   refreshTrainerOverlay();
-  if (session.mode === "train") {
+  if (session.mode === "dojo") {
     void finishTrainingRun(session);
     return;
   }
-  if (session.mode === "eval") {
+  if (session.mode === "trial") {
     finishEvaluationRun(session);
     return;
   }
-  showToast(`Challenge complete: ${session.score} hits.`);
+  showToast(`${trainerModeLabel(session.mode)} complete: ${session.score} takedowns.`);
   window.setTimeout(hideToast, 1800);
 }
 
@@ -1120,7 +1147,7 @@ async function finishTrainingRun(session) {
     return;
   }
 
-  showToast(`Training personal NN on ${samples.length} samples...`);
+  showToast(`Training personal NN from ${samples.length} Dojo samples...`);
   await nextFrame();
   try {
     const model = trainPersonalModel(session.kind, samples);
@@ -1128,7 +1155,7 @@ async function finishTrainingRun(session) {
     savePersonalModels(state.personalModels);
     refreshPersonalModelLabel();
     showToast(
-      `Personal NN ready: ${samples.length} samples, ${Math.round(model.fitMeanPx)} px fit.`,
+      `Dojo complete: ${samples.length} samples, ${Math.round(model.fitMeanPx)} px fit.`,
     );
     window.setTimeout(hideToast, 2200);
   } catch (error) {
@@ -1156,9 +1183,9 @@ function finishEvaluationRun(session) {
   refreshPersonalModelLabel();
   if (improvementPx !== null) {
     const direction = improvementPx >= 0 ? "better" : "worse";
-    showToast(`Test: ${Math.round(meanPx)} px, ${Math.abs(Math.round(improvementPx))} px ${direction}.`);
+    showToast(`Trial: ${Math.round(meanPx)} px, ${Math.abs(Math.round(improvementPx))} px ${direction}.`);
   } else {
-    showToast(`Test complete: ${Math.round(meanPx)} px mean error.`);
+    showToast(`Trial complete: ${Math.round(meanPx)} px mean error.`);
   }
   window.setTimeout(hideToast, 2200);
 }
@@ -1173,21 +1200,21 @@ function refreshTrainerOverlay() {
   }
 
   elements.trainerOverlay.classList.remove("hidden");
-  if (session.mode === "challenge") {
+  if (isWaveMode(session.mode)) {
     const secondsLeft = Math.max(0, Math.ceil((session.endsAt - performance.now()) / 1000));
     const progress = clamp01((performance.now() - session.startedAt) / CHALLENGE_DURATION_MS);
     elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
-    elements.trainerStep.textContent = `Compete · ${secondsLeft}s`;
-    elements.trainerTitle.textContent = `${session.score} hits`;
+    elements.trainerStep.textContent = `${trainerModeLabel(session.mode)} · ${secondsLeft}s`;
+    elements.trainerTitle.textContent = `${session.score} takedowns`;
     elements.trainerBody.textContent =
-      session.lastErrorPx === null ? "Acquire targets." : `${Math.round(session.lastErrorPx)} px`;
+      session.lastErrorPx === null ? "Acquire enemies." : `${Math.round(session.lastErrorPx)} px`;
     return;
   }
 
   const total = session.targets.length;
-  const label = session.mode === "eval" ? "Test" : "Training";
+  const label = trainerModeLabel(session.mode);
   const targetProgress = session.stepIndex / total;
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
+  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
   const phaseProgress =
     session.phase === "capture"
       ? Math.min(1, (performance.now() - session.phaseStartedAt) / captureMs)
@@ -1195,8 +1222,10 @@ function refreshTrainerOverlay() {
   const progress = targetProgress + phaseProgress / total;
   elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
   elements.trainerStep.textContent = `${label} ${session.stepIndex + 1} of ${total}`;
-  elements.trainerTitle.textContent = session.phase === "capture" ? "Hold target" : "Acquire target";
-  if (session.mode === "train") {
+  const targetNoun = trainerTargetNoun(session.mode);
+  elements.trainerTitle.textContent =
+    session.phase === "capture" ? `Hold ${targetNoun}` : `Acquire ${targetNoun}`;
+  if (session.mode === "dojo") {
     elements.trainerBody.textContent = `${session.capturedSamples.length + session.samples.length} samples`;
   } else {
     elements.trainerBody.textContent = `${session.errors.length + session.samples.length} readings`;
@@ -1372,7 +1401,7 @@ function sendCursor() {
   }
   const calibrationActive = Boolean(state.calibrationSession?.active);
   const trainerHidden = Boolean(
-    state.trainerSession?.active && state.trainerSession.mode !== "challenge",
+    state.trainerSession?.active && !isMultiplayerWaveMode(state.trainerSession.mode),
   );
   state.seq += 1;
   state.ws.send(
@@ -1420,7 +1449,7 @@ function drawStage() {
   }
 
   const trainerHidesCursor = Boolean(
-    state.trainerSession?.active && state.trainerSession.mode !== "challenge",
+    state.trainerSession?.active && !isWaveMode(state.trainerSession.mode),
   );
   if (state.local.tracking && !state.calibrationSession?.active && !trainerHidesCursor) {
     drawCursor(state.local.x, state.local.y, state.local.color, state.local.name, 1, true);
@@ -1546,21 +1575,66 @@ function drawTrainerTarget(width, height) {
   const py = target.y * height;
   const now = performance.now();
   const phaseElapsed = now - (session.phaseStartedAt || now);
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
-  const radius =
-    session.mode === "challenge"
-      ? CHALLENGE_TARGET_RADIUS_PX
-      : 18 + Math.min(1, phaseElapsed / captureMs) * 12;
-  const isCapture = session.phase === "capture" || session.mode === "challenge";
-  const pulse = 0.5 + 0.5 * Math.sin(now / 120);
-  const stroke =
-    session.mode === "challenge"
-      ? "rgba(255, 213, 112, 0.95)"
-      : isCapture
-        ? "rgba(156, 255, 210, 0.95)"
-        : "rgba(117, 216, 255, 0.94)";
-  const fill =
-    session.mode === "challenge" ? "rgba(255, 213, 112, 0.98)" : "rgba(156, 255, 210, 0.98)";
+  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
+  const warmup = Math.min(1, phaseElapsed / captureMs);
+  const isCapture = session.phase === "capture" || isWaveMode(session.mode);
+
+  if (session.mode === "dojo") {
+    drawDojoDummy(px, py, warmup, isCapture);
+  } else if (session.mode === "trial") {
+    drawTrialMark(px, py, warmup, isCapture);
+  } else if (isWaveMode(session.mode)) {
+    const dwellProgress = session.dwellStartedAt
+      ? clamp01((now - session.dwellStartedAt) / CHALLENGE_DWELL_MS)
+      : 0;
+    drawEnemy(px, py, session.score, dwellProgress, session.mode);
+  }
+}
+
+function drawDojoDummy(px, py, warmup, isCapture) {
+  const radius = 24 + warmup * 8;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 130);
+  const stroke = isCapture ? "rgba(156, 255, 210, 0.95)" : "rgba(117, 216, 255, 0.94)";
+
+  ctx.save();
+  ctx.shadowBlur = 28;
+  ctx.shadowColor = stroke;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(px, py, radius + pulse * 4, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = "rgba(255, 213, 112, 0.58)";
+  ctx.lineWidth = 6;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(px - 28, py + 10);
+  ctx.lineTo(px + 28, py + 10);
+  ctx.moveTo(px, py + 2);
+  ctx.lineTo(px, py + 46);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(174, 111, 58, 0.96)";
+  ctx.strokeStyle = "rgba(255, 213, 112, 0.86)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(px, py - 12, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(106, 66, 36, 0.92)";
+  roundRect(ctx, px - 16, py + 6, 32, 34, 8);
+  ctx.fill();
+
+  drawTargetGlyph(px, py, radius, "rgba(156, 255, 210, 0.98)");
+  ctx.restore();
+}
+
+function drawTrialMark(px, py, warmup, isCapture) {
+  const radius = 20 + warmup * 14;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
+  const stroke = isCapture ? "rgba(156, 255, 210, 0.96)" : "rgba(117, 216, 255, 0.94)";
 
   ctx.save();
   ctx.shadowBlur = 30;
@@ -1571,25 +1645,90 @@ function drawTrainerTarget(width, height) {
   ctx.arc(px, py, radius + pulse * 5, 0, Math.PI * 2);
   ctx.stroke();
   ctx.shadowBlur = 0;
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.arc(px, py, Math.max(6, radius * 0.2), 0, Math.PI * 2);
-  ctx.fill();
   ctx.strokeStyle = "rgba(238, 243, 255, 0.58)";
   ctx.beginPath();
-  ctx.moveTo(px - radius * 0.72, py);
-  ctx.lineTo(px + radius * 0.72, py);
-  ctx.moveTo(px, py - radius * 0.72);
-  ctx.lineTo(px, py + radius * 0.72);
+  ctx.arc(px, py, radius * 0.58, 0, Math.PI * 2);
   ctx.stroke();
-  if (session.mode === "challenge") {
-    ctx.font = "700 18px Inter, ui-sans-serif, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(5, 8, 13, 0.88)";
-    ctx.fillText(String(session.score), px, py);
-  }
+  drawTargetGlyph(px, py, radius, "rgba(156, 255, 210, 0.98)");
   ctx.restore();
+}
+
+function drawEnemy(px, py, score, dwellProgress, mode) {
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 105);
+  const radius = CHALLENGE_TARGET_RADIUS_PX;
+  const accent = mode === "multiplayer" ? "rgba(255, 111, 145, 0.95)" : "rgba(255, 213, 112, 0.95)";
+
+  ctx.save();
+  ctx.shadowBlur = 32;
+  ctx.shadowColor = accent;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(px, py, radius + pulse * 5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "rgba(15, 20, 32, 0.98)";
+  ctx.strokeStyle = "rgba(238, 243, 255, 0.3)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(px, py - 2, 25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(238, 243, 255, 0.88)";
+  roundRect(ctx, px - 16, py - 9, 32, 10, 5);
+  ctx.fill();
+  ctx.fillStyle = "rgba(5, 8, 13, 0.92)";
+  ctx.beginPath();
+  ctx.arc(px - 7, py - 4, 2.2, 0, Math.PI * 2);
+  ctx.arc(px + 7, py - 4, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(238, 243, 255, 0.7)";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(px + 15, py + 17);
+  ctx.lineTo(px + 36, py - 18);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 213, 112, 0.82)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px + 30, py - 26);
+  ctx.lineTo(px + 39, py - 12);
+  ctx.stroke();
+
+  if (dwellProgress > 0) {
+    ctx.strokeStyle = "rgba(156, 255, 210, 0.98)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(px, py, radius + 10, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * dwellProgress);
+    ctx.stroke();
+  }
+
+  drawTargetGlyph(px, py, radius, "rgba(255, 213, 112, 0.98)");
+  ctx.font = "700 14px Inter, ui-sans-serif, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(5, 8, 13, 0.86)";
+  ctx.fillText(String(score), px, py + 18);
+  ctx.restore();
+}
+
+function drawTargetGlyph(px, py, radius, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(px, py, Math.max(5, radius * 0.16), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(238, 243, 255, 0.58)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px - radius * 0.64, py);
+  ctx.lineTo(px + radius * 0.64, py);
+  ctx.moveTo(px, py - radius * 0.64);
+  ctx.lineTo(px, py + radius * 0.64);
+  ctx.stroke();
 }
 
 async function estimateGaze(result) {
@@ -2312,6 +2451,7 @@ function refreshPersonalModelLabel() {
   const hasPersonalData = Boolean(model) || sampleCount > 0;
   elements.evaluateButton.disabled = !model;
   elements.challengeButton.disabled = !model;
+  elements.multiplayerButton.disabled = !model;
   elements.resetPersonalButton.disabled = !hasPersonalData;
   const progress = clamp01(sampleCount / PERSONAL_MIN_SAMPLES);
   elements.personalProgressFill.style.width = `${Math.round(progress * 100)}%`;
@@ -2325,7 +2465,7 @@ function refreshPersonalModelLabel() {
       const direction = model.lastEvalDeltaPx >= 0 ? "better than base" : "worse than base";
       elements.personalModelMeta.textContent = `${Math.abs(Math.round(model.lastEvalDeltaPx))} px ${direction}`;
     } else {
-      elements.personalModelMeta.textContent = "Run Test for held-out accuracy";
+      elements.personalModelMeta.textContent = "Run Trial for held-out accuracy";
     }
     elements.personalProgressFill.style.width = "100%";
     return;
@@ -2345,11 +2485,11 @@ function shuffledTargets(targets) {
   return copy;
 }
 
-function randomChallengeTarget(previous) {
+function randomEnemyTarget(previous) {
   let target = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     target = {
-      id: `challenge-${Date.now()}-${attempt}`,
+      id: `enemy-${Date.now()}-${attempt}`,
       x: 0.12 + Math.random() * 0.76,
       y: 0.14 + Math.random() * 0.62,
     };

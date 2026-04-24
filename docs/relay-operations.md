@@ -23,6 +23,10 @@ five targets.
 For a local multi-user smoke test, open a second tab, join the same room, and enable
 `Mouse mode` under `Connection`.
 
+The room itself is a hangout. Dojo, Trial, and Solo are local runs. Multiplayer starts a
+room-visible wave with cursor broadcasting, but enemy spawn synchronization and score
+events are not relay protocol yet.
+
 ## Private Alpha Deployment
 
 For early remote tests, host the relay on a machine reachable by all testers through a

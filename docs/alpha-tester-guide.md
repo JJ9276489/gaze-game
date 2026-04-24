@@ -1,4 +1,4 @@
-# Gaze Game Alpha Tester Guide
+# Gaze Ninja Alpha Tester Guide
 
 This guide is for browser testers. You should not need Terminal, Python, or a native app.
 
@@ -19,18 +19,19 @@ This guide is for browser testers. You should not need Terminal, Python, or a na
 6. Use the fullscreen prompt or click `Full screen`.
 7. Look at each target until it moves.
 
-After calibration, you should see your cursor on the grid. If another tester joins the
-same room, you should see their cursor too.
+After calibration, you should be in the room hangout. If another tester joins the same
+room, you should see their cursor too.
 
 ## Train And Play
 
-1. Click `Train NN`.
-2. Keep looking at each target until the run finishes.
-3. Click `Test` to measure held-out accuracy.
-4. Click `Compete` to play the timed target game.
+1. Click `Dojo`.
+2. Defeat the training dummies by looking at them until the run finishes.
+3. Click `Trial` to measure held-out accuracy.
+4. Click `Solo` to play your own enemy wave.
+5. Click `Multiplayer` to play a room-visible wave.
 
-Training is local to your browser. Other people in the room do not receive your webcam
-data, training samples, or personal model.
+Dojo training is local to your browser. Other people in the room do not receive your
+webcam data, training samples, or personal model.
 
 ## Screen Controls
 
@@ -56,8 +57,8 @@ include the room code you tried.
 
 The cursor is inaccurate
 
-Re-enter fullscreen and run `Calibrate` again. Then collect a fresh `Train NN` run and
-use `Test` to compare the personal NN against the base model.
+Re-enter fullscreen and run `Calibrate` again. Then collect a fresh `Dojo` run and use
+`Trial` to compare the personal NN against the base model.
 
 The model says `Fallback`
 

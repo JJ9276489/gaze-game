@@ -3,6 +3,9 @@
 The end-user version should not require Terminal, Python, native app installation, or
 self-hosting.
 
+The current product skin is Gaze Ninja: room hangout first, then opt-in Dojo, Solo, or
+Multiplayer enemy waves.
+
 ## User Flow
 
 1. User opens a hosted HTTPS URL.
@@ -12,8 +15,9 @@ self-hosting.
 5. `Create Room` shows a short code like `K7M-4QX`.
 6. Another user enters that room code.
 7. User clicks `Calibrate` and looks at five fullscreen targets.
-8. User can click `Train NN` to collect local samples and fit a personal adapter.
-9. User can click `Test` for held-out accuracy or `Compete` for the target game.
+8. User can click `Dojo` to collect local samples and fit a personal adapter.
+9. User can click `Trial` for held-out accuracy, `Solo` for local waves, or `Multiplayer`
+   for room-visible waves.
 10. Both clients connect to the hosted relay over `wss://`.
 11. Each browser runs gaze inference locally with the ONNX-exported model and sends only
    cursor coordinates.
@@ -49,8 +53,8 @@ The browser client should eventually show an equivalent line that swaps "your Ma
 
 ## Training Model
 
-The current browser product trains a small personal NN adapter on top of the selected
-base ONNX model:
+The current browser product trains a small personal NN adapter in the Dojo on top of the
+selected base ONNX model:
 
 ```text
 base gaze model -> raw gaze/features -> personal adapter -> corrected cursor
