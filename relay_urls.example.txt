@@ -1,5 +1,6 @@
+# Legacy macOS packaged-alpha only.
 # Copy this file to relay_urls.local.txt before building a private alpha zip.
-# The build script will copy relay_urls.local.txt into the zip as relay_urls.txt.
+# The build script copies relay_urls.local.txt into the zip as relay_urls.txt.
 # Keep relay_urls.local.txt private; it is ignored by git.
 
 ws://relay-host.example:8765

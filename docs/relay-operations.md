@@ -5,7 +5,7 @@ to peers in the same room. It also serves the browser client from `web/` by defa
 
 ## Local Development
 
-Run a local relay:
+Run a local relay and static browser host:
 
 ```bash
 python relay_server.py --host 127.0.0.1 --port 8765
@@ -19,6 +19,9 @@ http://127.0.0.1:8765
 
 Join a room in the browser, then click `Calibrate` and keep the page fullscreen during the
 five targets.
+
+For a local multi-user smoke test, open a second tab, join the same room, and enable
+`Mouse mode` under `Connection`.
 
 ## Private Alpha Deployment
 
@@ -36,9 +39,24 @@ tailscale serve --bg 8765
 
 Testers open the generated `https://...ts.net` URL. Browser camera access requires HTTPS
 for remote pages. The relay machine must have the ignored
-`web/models/vision_gaze_spatial_geom.onnx` asset for browser model inference. Generate and
-verify that ONNX asset on a development machine with `requirements-dev.txt`, then sync it
-to the relay.
+`web/models/*.onnx` assets needed for browser model inference. Generate and verify those
+assets on a development machine with `requirements-dev.txt`, then sync them to the relay.
+
+For the current Prometheus LAN relay:
+
+```bash
+ssh prometheus@prometheus
+cd ~/gaze-game-relay
+systemctl --user status gaze-game-relay.service
+systemctl --user restart gaze-game-relay.service
+tailscale serve status
+```
+
+The relay should remain fronted by HTTPS:
+
+```text
+https://prometheus.tailcf7f8f.ts.net/
+```
 
 ## Production Requirements
 
@@ -53,5 +71,6 @@ add:
 - idle timeout cleanup
 - structured logs and basic metrics
 - abuse reporting or operator controls
+- explicit data-collection consent before accepting webcam-derived training data
 
 Users should not expose a relay port from their own Mac for normal use.

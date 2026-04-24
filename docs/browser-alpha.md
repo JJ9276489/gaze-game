@@ -7,12 +7,14 @@ coordinates to the relay.
 
 ## What Works
 
-- MacBook browsers
+- laptop and desktop browsers with webcam access
 - Chromebook browsers
 - local two-client tests from one computer
-- remote private tests through Tailscale
+- remote private tests through Tailscale or another private HTTPS front door
 - ONNX-exported gaze checkpoint inference
 - five-point fullscreen calibration with saved local browser state
+- browser-local personal NN adapter training
+- held-out testing and timed target competition
 - heuristic fallback if the ONNX model asset is missing
 - mouse mode when camera gaze is unavailable
 
@@ -22,6 +24,7 @@ The browser client loads:
 
 ```text
 web/models/vision_gaze_spatial_geom.onnx
+web/models/vision_gaze_latest.onnx
 ```
 
 Generate it from the local PyTorch checkpoint before deploying the browser alpha:
@@ -33,8 +36,9 @@ python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-The ONNX file is ignored by git because it is derived from the local checkpoint. Put it on
-the private relay machine with the web client, but do not commit it to the public repo.
+ONNX files are ignored by git because they are derived from local checkpoints. Put the
+needed model files on the private relay machine with the web client, but do not commit
+them to the public repo.
 
 ## Local Test
 
@@ -58,11 +62,13 @@ For a two-client test on one computer:
 2. Enter your name.
 3. Click Create room.
 4. Click `Calibrate` and keep staring at each target until it moves.
-5. Open the page in a second tab or another browser.
-6. Enter a different name.
-7. Enter the same room code.
-8. Open Connection and enable Mouse mode.
-9. Click Join room.
+5. Click `Train NN` and complete a target run.
+6. Click `Test` to measure the held-out error.
+7. Open the page in a second tab or another browser.
+8. Enter a different name.
+9. Enter the same room code.
+10. Open Connection and enable Mouse mode.
+11. Click Join room.
 
 ## Private Remote Test With Tailscale
 
@@ -99,6 +105,25 @@ a Tailscale share for the relay machine.
 5. Click Create room, or enter a room code and click Join room.
 6. Allow camera access when the browser asks.
 7. Click `Calibrate`.
+8. Click `Train NN`.
+9. Click `Test` or `Compete`.
+
+## Multi-User Behavior
+
+Rooms share cursor state only. Calibration, training, and testing are per-user browser
+runs. One user starting `Train NN` does not start training for anyone else, and the app
+hides that user's cursor from peers during training and testing so stale target movement
+does not distract the room.
+
+`Compete` is the current shared gameplay mode. It still runs each user's personal model
+locally, then broadcasts only the resulting cursor state.
+
+## Screen Controls
+
+- `Full screen` enters or exits fullscreen.
+- `Hide buttons` keeps the room code visible and hides the larger HUD controls.
+- `F` toggles fullscreen.
+- `H` toggles hidden controls.
 
 ## Chromebook Notes
 

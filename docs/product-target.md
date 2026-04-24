@@ -12,8 +12,10 @@ self-hosting.
 5. `Create Room` shows a short code like `K7M-4QX`.
 6. Another user enters that room code.
 7. User clicks `Calibrate` and looks at five fullscreen targets.
-8. Both clients connect to the hosted relay over `wss://`.
-9. Each browser runs gaze inference locally with the ONNX-exported model and sends only
+8. User can click `Train NN` to collect local samples and fit a personal adapter.
+9. User can click `Test` for held-out accuracy or `Compete` for the target game.
+10. Both clients connect to the hosted relay over `wss://`.
+11. Each browser runs gaze inference locally with the ONNX-exported model and sends only
    cursor coordinates.
 
 For local development, the default relay is:
@@ -44,6 +46,23 @@ landmarks never leave your Mac.
 
 The browser client should eventually show an equivalent line that swaps "your Mac" for
 "your device" near the camera prompt.
+
+## Training Model
+
+The current browser product trains a small personal NN adapter on top of the selected
+base ONNX model:
+
+```text
+base gaze model -> raw gaze/features -> personal adapter -> corrected cursor
+```
+
+This is intentionally local-first. Training samples and fitted weights stay in browser
+storage unless the user explicitly exports or uploads them in a future data-collection
+flow.
+
+Future full-model training should be staged behind explicit consent and separate data
+collection controls because it requires storing eye crops or derived tensors, not just
+cursor coordinates.
 
 ## Relay
 

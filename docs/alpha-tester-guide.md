@@ -1,77 +1,65 @@
 # Gaze Game Alpha Tester Guide
 
-This guide is for someone receiving a prebuilt Gaze Game zip. It does not require
-Terminal or Python.
+This guide is for browser testers. You should not need Terminal, Python, or a native app.
 
 ## What You Need
 
-- An Apple Silicon MacBook
-- A webcam that works in other apps
-- Tailscale, if the test organizer says the relay is on a private network
-- The latest `Gaze-Game-alpha-macos-arm64.zip`
+- A laptop or desktop with a working webcam.
+- Chrome, Edge, Safari, or another modern browser.
+- Tailscale only if the organizer says the test URL is private to Tailscale.
+- The HTTPS test URL from the organizer.
 
-## Install Tailscale
+## Join The Test
 
-Skip this section if the test organizer says Tailscale is not needed.
+1. Open the HTTPS URL from the organizer.
+2. Enter your name.
+3. Click `Create room`, or enter a room code and click `Join room`.
+4. Allow camera access when the browser asks.
+5. Click `Calibrate`.
+6. Use the fullscreen prompt or click `Full screen`.
+7. Look at each target until it moves.
 
-1. Open the official Mac download page:
-   [tailscale.com/download/mac](https://tailscale.com/download/mac)
-2. Install Tailscale.
-3. Sign in, or accept the invite sent by the test organizer.
-4. Wait until Tailscale says it is connected.
-5. Leave Tailscale running while using Gaze Game.
+After calibration, you should see your cursor on the grid. If another tester joins the
+same room, you should see their cursor too.
 
-Tailscale also has official Mac install docs:
-[tailscale.com/kb/1016/install-mac](https://tailscale.com/kb/1016/install-mac).
+## Train And Play
 
-## Open The App
+1. Click `Train NN`.
+2. Keep looking at each target until the run finishes.
+3. Click `Test` to measure held-out accuracy.
+4. Click `Compete` to play the timed target game.
 
-1. Unzip `Gaze-Game-alpha-macos-arm64.zip`.
-2. Open the unzipped folder.
-3. Do not drag individual files somewhere else.
-4. Right-click `Gaze Game.app`.
-5. Click Open.
-6. If macOS asks whether you are sure, click Open again.
-7. When macOS asks for Camera access, click Allow.
+Training is local to your browser. Other people in the room do not receive your webcam
+data, training samples, or personal model.
 
-## Create A Room
+## Screen Controls
 
-Use this if you are starting the session.
+- `Full screen` enters or exits fullscreen.
+- `Hide buttons` removes most controls while keeping the room code visible.
+- Press `F` to toggle fullscreen.
+- Press `H` to hide or show controls.
 
-1. Type your name.
-2. Click Create Room.
-3. Send the room code to the other person.
-
-## Join A Room
-
-Use this if someone sent you a room code.
-
-1. Type your name.
-2. Type the room code.
-3. Click Join Room.
-
-## What You Should See
-
-You should see a dark grid. Your gaze cursor and the other person's cursor should both
-appear in the room.
+During calibration, training, testing, and competition, the app keeps the screen minimal
+so the UI does not block targets.
 
 ## Troubleshooting
 
-`Relay unavailable`
+`Camera access needs HTTPS or localhost`
 
-The app cannot reach the relay. Make sure Tailscale is connected, and make sure
-you opened the app from the original unzipped folder.
+Use the organizer's `https://...` URL. Plain HTTP camera access only works for local
+developer tests on `localhost` or `127.0.0.1`.
 
-`Camera unavailable`
+`Could not connect to relay`
 
-Open System Settings > Privacy & Security > Camera, enable Gaze Game, then reopen the
-app.
-
-The app will not open
-
-Right-click `Gaze Game.app` and choose Open. Do not double-click the first time.
+The relay host may be down, or Tailscale may not be connected. Tell the organizer and
+include the room code you tried.
 
 The cursor is inaccurate
 
-This can happen in early testing if the gaze model was not trained on your MacBook and
-your eyes. The networking test is still valid if your cursor appears and moves.
+Re-enter fullscreen and run `Calibrate` again. Then collect a fresh `Train NN` run and
+use `Test` to compare the personal NN against the base model.
+
+The model says `Fallback`
+
+The browser could not load the ONNX gaze model from the relay. The room can still be
+tested with mouse mode, but gaze quality will not represent the real model.
