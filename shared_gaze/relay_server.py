@@ -1,7 +1,13 @@
 import argparse
 import asyncio
 from dataclasses import dataclass
+import mimetypes
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 from typing import Any
+
+from websockets.datastructures import Headers
+from websockets.http11 import Response
 
 try:
     from websockets.asyncio.server import serve
@@ -9,6 +15,10 @@ except ImportError:  # pragma: no cover - compatibility for older websockets
     from websockets import serve
 
 from shared_gaze.protocol import clamp01, decode, encode, make_client_id, now_ms
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WEB_DIR = PROJECT_ROOT / "web"
 
 
 @dataclass
@@ -178,10 +188,82 @@ async def handle_client(websocket, state: RelayState) -> None:
         print(f"{client.id} disconnected")
 
 
-async def run_server(host: str, port: int) -> None:
+def _response(
+    status_code: int,
+    reason_phrase: str,
+    body: bytes,
+    content_type: str = "text/plain; charset=utf-8",
+) -> Response:
+    headers = Headers()
+    headers["Content-Type"] = content_type
+    headers["Content-Length"] = str(len(body))
+    headers["X-Content-Type-Options"] = "nosniff"
+    return Response(status_code, reason_phrase, headers, body)
+
+
+def _static_response(web_dir: Path, request_path: str) -> Response:
+    parsed = urlparse(request_path)
+    rel_path = unquote(parsed.path).lstrip("/")
+    if not rel_path:
+        rel_path = "index.html"
+
+    root = web_dir.resolve()
+    target = (root / rel_path).resolve()
+    if root != target and root not in target.parents:
+        return _response(403, "Forbidden", b"Forbidden\n")
+    if target.is_dir():
+        target = target / "index.html"
+
+    try:
+        body = target.read_bytes()
+    except FileNotFoundError:
+        return _response(404, "Not Found", b"Not found\n")
+    except OSError:
+        return _response(500, "Internal Server Error", b"Could not read file\n")
+
+    content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    cache_control = (
+        "no-store"
+        if target.suffix in {".html", ".js", ".css"}
+        else "public, max-age=3600"
+    )
+    headers = Headers()
+    headers["Content-Type"] = content_type
+    headers["Content-Length"] = str(len(body))
+    headers["Cache-Control"] = cache_control
+    headers["X-Content-Type-Options"] = "nosniff"
+    return Response(200, "OK", headers, body)
+
+
+def make_static_process_request(web_dir: Path):
+    def process_request(connection, request):
+        upgrade = request.headers.get("Upgrade", "")
+        if upgrade.lower() == "websocket":
+            return None
+        return _static_response(web_dir, request.path)
+
+    return process_request
+
+
+async def run_server(host: str, port: int, web_dir: Path | None = DEFAULT_WEB_DIR) -> None:
     state = RelayState()
-    async with serve(lambda websocket: handle_client(websocket, state), host, port):
+    process_request = None
+    if web_dir is not None:
+        web_dir = web_dir.expanduser().resolve()
+        if web_dir.exists():
+            process_request = make_static_process_request(web_dir)
+        else:
+            print(f"Web client disabled because {web_dir} does not exist")
+
+    async with serve(
+        lambda websocket: handle_client(websocket, state),
+        host,
+        port,
+        process_request=process_request,
+    ):
         print(f"Gaze relay listening on ws://{host}:{port}")
+        if process_request is not None:
+            print(f"Browser client listening on http://{host}:{port}")
         await asyncio.Future()
 
 
@@ -189,10 +271,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the shared gaze-cursor relay.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--web-dir",
+        type=Path,
+        default=DEFAULT_WEB_DIR,
+        help="Directory to serve as the browser client. Defaults to ./web.",
+    )
+    parser.add_argument("--no-web", action="store_true", help="Disable the browser client.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    asyncio.run(run_server(args.host, args.port))
-
+    asyncio.run(run_server(args.host, args.port, None if args.no_web else args.web_dir))

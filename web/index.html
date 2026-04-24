@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gaze Game</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="stage">
+      <canvas id="stageCanvas" aria-label="Shared gaze cursor stage"></canvas>
+      <video id="camera" playsinline autoplay muted></video>
+
+      <section id="lobby" class="panel" aria-labelledby="title">
+        <div class="panel-header">
+          <div>
+            <div class="brand-mark" aria-hidden="true">GG</div>
+            <h1 id="title">Gaze Game</h1>
+          </div>
+          <div id="secureBadge" class="badge">Camera ready</div>
+        </div>
+
+        <form id="joinForm" autocomplete="on">
+          <label>
+            <span>Name</span>
+            <input id="nameInput" name="name" maxlength="32" autocomplete="name" placeholder="Your name">
+          </label>
+
+          <label>
+            <span>Room code</span>
+            <input id="roomInput" name="room" maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC-123">
+          </label>
+
+          <div class="button-row">
+            <button id="createButton" type="button">Create room</button>
+            <button id="joinButton" type="submit">Join room</button>
+          </div>
+
+          <div class="flow-strip" aria-label="Game loop">
+            <span>Train</span>
+            <span>Test</span>
+            <span>Compete</span>
+          </div>
+
+          <details class="advanced">
+            <summary>Connection</summary>
+            <label>
+              <span>Relay</span>
+              <input id="relayInput" name="relay" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="toggle-row">
+              <input id="mouseModeInput" type="checkbox">
+              <span>Mouse mode</span>
+            </label>
+          </details>
+        </form>
+
+        <p id="statusLine" class="status-line">Ready</p>
+      </section>
+
+      <section id="hud" class="hud hidden" aria-live="polite">
+        <div class="hud-cluster">
+          <div class="room-block">
+            <span class="hud-label">Room</span>
+            <div class="room-code-row">
+              <strong id="roomLabel"></strong>
+              <button id="copyRoomButton" type="button">Copy</button>
+            </div>
+          </div>
+          <div class="hud-meta">
+            <span class="hud-label">You</span>
+            <strong id="nameLabel"></strong>
+          </div>
+          <div class="hud-meta">
+            <span class="hud-label">Status</span>
+            <strong id="trackingLabel">Starting</strong>
+          </div>
+          <label class="hud-model">
+            <span class="hud-label">Model</span>
+            <select id="modelSelect">
+              <option value="spatial_geom">Spatial geom</option>
+              <option value="latest">Concat latest</option>
+            </select>
+          </label>
+        </div>
+        <div id="personalModelPanel" class="personal-card">
+          <div class="personal-card-header">
+            <span class="hud-label">Personal NN</span>
+            <strong id="personalModelLabel">No data</strong>
+          </div>
+          <div class="personal-progress" aria-hidden="true">
+            <span id="personalProgressFill"></span>
+          </div>
+          <small id="personalModelMeta">Local only</small>
+        </div>
+        <div class="hud-controls">
+          <div class="hud-system-actions" aria-label="Screen controls">
+            <button id="fullscreenButton" class="quiet-action" type="button" aria-pressed="false">Full screen</button>
+            <button
+              id="toggleControlsButton"
+              class="quiet-action"
+              type="button"
+              aria-controls="hudActionButtons personalModelPanel"
+              aria-expanded="true"
+              aria-pressed="false"
+            >Hide buttons</button>
+          </div>
+          <div id="hudActionButtons" class="hud-actions">
+            <button id="trainButton" class="primary-action" type="button">Train NN</button>
+            <button id="evaluateButton" class="secondary-action" type="button">Test</button>
+            <button id="challengeButton" class="secondary-action" type="button">Compete</button>
+            <button id="calibrateButton" class="quiet-action" type="button">Calibrate</button>
+            <button id="resetPersonalButton" type="button">Reset NN</button>
+            <button id="leaveButton" class="quiet-action" type="button">Leave</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="calibrationOverlay" class="calibration hidden" aria-live="polite">
+        <div class="calibration-card">
+          <p id="calibrationStep" class="calibration-step">Calibration 1 of 5</p>
+          <h2 id="calibrationTitle">Look at the dot</h2>
+          <p id="calibrationBody" class="calibration-body">
+            Keep your head still until the target moves.
+          </p>
+          <div class="hud-actions">
+            <button id="calibrationCancelButton" type="button">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="trainerOverlay" class="trainer hidden" aria-live="polite">
+        <div class="trainer-dock">
+          <div class="trainer-copy">
+            <p id="trainerStep" class="calibration-step">Training</p>
+            <h2 id="trainerTitle">Target run</h2>
+            <p id="trainerBody" class="calibration-body">Collecting samples.</p>
+          </div>
+          <div class="run-progress" aria-hidden="true">
+            <span id="trainerProgressFill"></span>
+          </div>
+          <div class="hud-actions">
+            <button id="trainerCancelButton" type="button">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden"></div>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

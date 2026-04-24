@@ -11,3 +11,6 @@ dist/
 models/*.task
 models/*.pt
 models/*.json
+web/models/*.onnx
+web/models/*.pt
+web/models/*.json
