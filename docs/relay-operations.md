@@ -1,7 +1,7 @@
 # Relay Operations
 
 The relay is a small WebSocket process that receives cursor updates and broadcasts them
-to peers in the same room.
+to peers in the same room. It also serves the browser client from `web/` by default.
 
 ## Local Development
 
@@ -11,37 +11,34 @@ Run a local relay:
 python relay_server.py --host 127.0.0.1 --port 8765
 ```
 
-Run a client against it:
+Open the browser client:
 
-```bash
-python gaze_game.py --server ws://127.0.0.1:8765 --room TEST-01 --name Player
+```text
+http://127.0.0.1:8765
 ```
 
-Run a second local client with the mouse:
-
-```bash
-python gaze_game.py --server ws://127.0.0.1:8765 --room TEST-01 --name Mouse --mouse --windowed
-```
+Join a room in the browser, then click `Calibrate` and keep the page fullscreen during the
+five targets.
 
 ## Private Alpha Deployment
 
 For early remote tests, host the relay on a machine reachable by all testers through a
-private network or VPN. Configure clients with:
+private network or VPN.
+
+For browser tests, keep the Python relay bound to localhost and expose it with a private
+HTTPS proxy such as Tailscale Serve:
 
 ```bash
-GAZE_GAME_RELAY_URL=ws://relay-host.example:8765 python gaze_game.py
+python -m pip install -r requirements-relay.txt
+python relay_server.py --host 127.0.0.1 --port 8765
+tailscale serve --bg 8765
 ```
 
-Or pass a relay explicitly:
-
-```bash
-python gaze_game.py --server ws://relay-host.example:8765
-```
-
-For packaged alpha builds, put relay URLs in `relay_urls.local.txt` before running the
-macOS build script. The script copies that ignored local file into the alpha zip as
-`relay_urls.txt` in the same unzipped folder as `Gaze Game.app`, so testers do not need
-Terminal.
+Testers open the generated `https://...ts.net` URL. Browser camera access requires HTTPS
+for remote pages. The relay machine must have the ignored
+`web/models/vision_gaze_spatial_geom.onnx` asset for browser model inference. Generate and
+verify that ONNX asset on a development machine with `requirements-dev.txt`, then sync it
+to the relay.
 
 ## Production Requirements
 

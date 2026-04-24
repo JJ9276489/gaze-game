@@ -1,17 +1,20 @@
 # Product Target
 
-The end-user version should not require Terminal, Python, or self-hosting.
+The end-user version should not require Terminal, Python, native app installation, or
+self-hosting.
 
 ## User Flow
 
-1. User installs `Gaze Game.app`.
-2. On first launch, macOS asks for Camera permission.
+1. User opens a hosted HTTPS URL.
+2. The browser asks for Camera permission.
 3. User enters a display name.
 4. User chooses `Create Room` or `Join Room`.
 5. `Create Room` shows a short code like `K7M-4QX`.
 6. Another user enters that room code.
-7. Both Macs connect to the hosted relay over `wss://`.
-8. Each Mac runs gaze inference locally and sends only cursor coordinates.
+7. User clicks `Calibrate` and looks at five fullscreen targets.
+8. Both clients connect to the hosted relay over `wss://`.
+9. Each browser runs gaze inference locally with the ONNX-exported model and sends only
+   cursor coordinates.
 
 For local development, the default relay is:
 
@@ -19,22 +22,28 @@ For local development, the default relay is:
 ws://127.0.0.1:8765
 ```
 
-Private alpha builds should configure their own reachable relay URL with
-`GAZE_GAME_RELAY_URL`, `GAZE_GAME_RELAY_URLS`, or `--server`.
+The packaged macOS app is still useful as a benchmark against the original PyTorch
+runtime, but it is not the primary user path.
 
 ## Camera Permission
 
-Camera permission must belong to the shipped app bundle. A packaged macOS app needs an
-`NSCameraUsageDescription` entry in `Info.plist`. Running from Codex or Terminal is a
-developer-only path and may attribute camera permission to the parent app instead of the
-final product.
+For the browser version, Camera permission belongs to the HTTPS origin. Remote browser
+tests must use HTTPS; local tests can use `localhost`.
 
-The app copy in this repo uses:
+For the packaged macOS app, Camera permission must belong to the shipped app bundle. A
+packaged macOS app needs an `NSCameraUsageDescription` entry in `Info.plist`. Running
+from Codex or Terminal is a developer-only path and may attribute camera permission to
+the parent app instead of the final product.
+
+The macOS app copy in this repo uses:
 
 ```text
 Gaze Game uses your camera locally to estimate gaze. Video, eye crops, and face
 landmarks never leave your Mac.
 ```
+
+The browser client should eventually show an equivalent line that swaps "your Mac" for
+"your device" near the camera prompt.
 
 ## Relay
 
