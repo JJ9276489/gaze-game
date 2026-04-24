@@ -99,15 +99,8 @@ a Tailscale share for the relay machine.
 
 ## Tester Steps
 
-1. Install Tailscale if the organizer says the test uses Tailscale.
-2. Sign in or accept the relay-machine share.
-3. Open the HTTPS URL from the organizer.
-4. Enter a name.
-5. Click Create room, or enter a room code and click Join room.
-6. Allow camera access when the browser asks.
-7. Click `Calibrate`.
-8. Click `Dojo`.
-9. Click `Solo` or `Multiplayer`.
+See [alpha-tester-guide.md](alpha-tester-guide.md) for the tester-facing join and play
+steps.
 
 ## Multi-User Behavior
 
@@ -116,12 +109,9 @@ starting `Dojo` does not start training for anyone else, and the app hides that 
 cursor from peers during local training so stale target movement does not distract the
 room.
 
-`Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` sends a
-`wave_start` event to the relay. The relay stores one active wave per room, broadcasts the
-same seed and target list to every player in that room, and includes the active wave in a
-late joiner's welcome message while the wave is still running. Each client still decides
-its own gaze hits locally and sends `wave_hit`; the relay broadcasts sanitized
-`wave_score` updates for the canvas leaderboard.
+`Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` shares a wave
+across the room; see [relay-operations.md](relay-operations.md#local-development) for the
+relay-side `wave_start` / `wave_hit` / `wave_score` behavior.
 
 The current relay is not an authoritative anti-cheat game server. It trusts client score
 events and should stay private until room auth, rate limits, and authoritative scoring are
@@ -129,10 +119,7 @@ designed.
 
 ## Screen Controls
 
-- `Full screen` enters or exits fullscreen.
-- `Hide buttons` keeps the room code visible and hides the larger HUD controls.
-- `F` toggles fullscreen.
-- `H` toggles hidden controls.
+See [alpha-tester-guide.md](alpha-tester-guide.md#screen-controls).
 
 ## Chromebook Notes
 

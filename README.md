@@ -29,87 +29,53 @@ and players opt into game runs when they are ready:
 
 ## Privacy Boundary
 
-The relay receives:
-
-- room code
-- display name
-- cursor color
-- normalized `x` / `y`
-- tracking state
-- timestamps and sequence counters
-
-The relay does not receive:
-
-- webcam frames
-- eye crops
-- face landmarks
-- MediaPipe outputs
-- model tensors
-- checkpoints
-- personal training samples
-
-Current personal NN training is browser-local and stored in browser storage.
+The relay receives only cursor-level state (room code, name, normalized coordinates,
+tracking, timestamps, wave seeds/scores). Webcam frames, eye crops, face landmarks,
+MediaPipe outputs, model tensors, checkpoints, and personal training samples stay on the
+user's device. See
+[docs/product-target.md#data-sent-over-the-network](docs/product-target.md#data-sent-over-the-network)
+for the authoritative list.
 
 ## Setup
 
-Use Python 3.11 for the Python tooling:
+Python 3.11 for the local tooling. Pick the requirements file that matches the role:
 
 ```bash
 git clone git@github.com:JJ9276489/gaze-game.git
 cd gaze-game
-python3.11 -m venv .venv
-source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
-
-For relay-only deployment:
-
-```bash
-python -m pip install -r requirements-relay.txt
-```
-
-For ONNX export and verification:
-
-```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements.txt        # legacy Python client + dev
+python -m pip install -r requirements-relay.txt  # relay-only host
+python -m pip install -r requirements-dev.txt    # also gets ONNX export/verify
 ```
 
 ## Model Assets
 
-The browser client looks for these optional model files:
+Model files are ignored by git; generate or copy them onto the relay machine before
+testing gaze inference. If no ONNX model loads, the browser falls back to a heuristic
+predictor so room networking still works.
+
+Browser (primary):
 
 ```text
 web/models/vision_gaze_spatial_geom.onnx
 web/models/vision_gaze_latest.onnx
 ```
 
-Model files are intentionally ignored by git. Generate or copy them onto the relay
-machine before testing gaze inference. If a selected ONNX model is missing, the browser
-falls back to a heuristic predictor so room networking can still be tested.
-
-Export the spatial-geom checkpoint:
+Export from the local PyTorch checkpoint:
 
 ```bash
-source .venv/bin/activate
 python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-The default output path is:
-
-```text
-web/models/vision_gaze_spatial_geom.onnx
-```
-
-The PyTorch legacy path expects:
+Legacy Python/macOS path:
 
 ```text
 models/vision_gaze_spatial_geom.pt
 models/face_landmarker.task
 ```
-
-Those files are also ignored.
 
 ## Local Run
 
@@ -129,19 +95,8 @@ http://127.0.0.1:8765
 For a two-client local test, open a second tab, join the same room, and enable `Mouse
 mode` under `Connection`.
 
-Useful in-session controls:
-
-- `Full screen` enters or exits fullscreen.
-- `Hide buttons` keeps the room code visible and removes distracting controls.
-- `F` toggles fullscreen.
-- `H` toggles hidden controls.
-
-Game modes:
-
-- `Dojo` spawns training dummies and uses them as local NN training labels.
-- `Solo` spawns enemy waves locally.
-- `Multiplayer` starts a synchronized room wave with shared targets and relay-broadcast
-  scores while still keeping webcam data local.
+See [docs/alpha-tester-guide.md](docs/alpha-tester-guide.md) for in-session screen
+controls and the Dojo / Solo / Multiplayer game modes.
 
 ## Private Remote Run
 
