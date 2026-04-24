@@ -1,8 +1,8 @@
 # Browser Alpha
 
 The browser app is the primary product path. The current game skin is Gaze Ninja: the
-room is a hangout by default, the Dojo trains the personal model with dummies, and Solo
-or Multiplayer waves spawn enemies as gaze targets.
+room is a hangout by default, the Dojo trains the personal model with dummies, and room
+play uses Solo or Multiplayer enemy waves as gaze targets.
 
 ## What Works
 
@@ -13,7 +13,7 @@ or Multiplayer waves spawn enemies as gaze targets.
 - ONNX-exported gaze checkpoint inference
 - five-point fullscreen calibration with saved local browser state
 - browser-local personal NN adapter training
-- held-out testing and timed target competition
+- timed Solo and Multiplayer target competition
 - hangout rooms with opt-in game waves
 - synchronized multiplayer enemy waves with room-visible scores
 - heuristic fallback if the ONNX model asset is missing
@@ -64,13 +64,12 @@ For a two-client test on one computer:
 3. Click `Dojo`.
 4. Click `Calibrate` and keep staring at each target until it moves.
 5. Complete a Dojo dummy run.
-6. Click `Trial` to measure the held-out error.
-7. Click `Leave`, then click `Create room`.
-8. Open the page in a second tab or another browser.
-9. Enter a different name.
-10. Enter the same room code.
-11. Open Connection and enable Mouse mode if you only need to validate networking.
-12. Click Join room.
+6. Click `Leave`, then click `Create room`.
+7. Open the page in a second tab or another browser.
+8. Enter a different name.
+9. Enter the same room code.
+10. Open Connection and enable Mouse mode if you only need to validate networking.
+11. Click Join room.
 
 ## Private Remote Test With Tailscale
 
@@ -108,14 +107,14 @@ a Tailscale share for the relay machine.
 6. Allow camera access when the browser asks.
 7. Click `Calibrate`.
 8. Click `Dojo`.
-9. Click `Trial`, `Solo`, or `Multiplayer`.
+9. Click `Solo` or `Multiplayer`.
 
 ## Multi-User Behavior
 
-Rooms share cursor state only. Calibration, Dojo, and Trial are per-user browser runs.
-One user starting `Dojo` does not start training for anyone else, and the app hides that
-user's cursor from peers during Dojo and Trial so stale target movement does not distract
-the room.
+Rooms share cursor state only. Calibration and Dojo are per-user browser runs. One user
+starting `Dojo` does not start training for anyone else, and the app hides that user's
+cursor from peers during local training so stale target movement does not distract the
+room.
 
 `Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` sends a
 `wave_start` event to the relay. The relay stores one active wave per room, broadcasts the

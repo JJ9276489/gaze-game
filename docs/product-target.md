@@ -16,8 +16,8 @@ personal model into a room hangout for Solo or Multiplayer enemy waves.
    personal adapter without joining the relay.
 6. `Create room` shows a short code like `K7M-4QX`.
 7. Another user enters that room code and clicks `Join room`.
-8. Users can click `Trial` for held-out accuracy, `Solo` for local waves, or
-   `Multiplayer` for synchronized room-visible waves.
+8. Users can click `Solo` for local waves or `Multiplayer` for synchronized room-visible
+   waves.
 9. Room clients connect to the hosted relay over `wss://`.
 10. Each browser runs gaze inference locally with the ONNX-exported model and sends only
    cursor coordinates.

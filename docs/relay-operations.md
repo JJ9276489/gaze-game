@@ -23,10 +23,11 @@ five targets.
 For a local multi-user smoke test, open a second tab, join the same room, and enable
 `Mouse mode` under `Connection`.
 
-The room itself is a hangout. Dojo, Trial, and Solo are local runs. Multiplayer starts a
-room-visible wave. The relay stores one active wave per room, broadcasts `wave_start` to
-everyone in that room, includes the active wave in `welcome` for late joiners, and
-broadcasts sanitized `wave_score` updates after clients send `wave_hit`.
+The room itself is a hangout. Dojo is a separate local training context, Solo is a local
+room run, and Multiplayer starts a room-visible wave. The relay stores one active wave
+per room, broadcasts `wave_start` to everyone in that room, includes the active wave in
+`welcome` for late joiners, and broadcasts sanitized `wave_score` updates after clients
+send `wave_hit`.
 
 ## Private Alpha Deployment
 

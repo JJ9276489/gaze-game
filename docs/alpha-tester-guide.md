@@ -27,9 +27,9 @@ room, you should see their cursor too.
 
 1. Click `Dojo`.
 2. Defeat the training dummies by looking at them until the run finishes.
-3. Click `Trial` to measure held-out accuracy.
+3. Join or create a room.
 4. Click `Solo` to play your own enemy wave.
-5. Join or create a room, then click `Multiplayer` to start a synchronized room wave.
+5. Click `Multiplayer` to start a synchronized room wave.
 
 Dojo training is local to your browser. Other people in the room do not receive your
 webcam data, training samples, or personal model.
@@ -58,8 +58,8 @@ include the room code you tried.
 
 The cursor is inaccurate
 
-Re-enter fullscreen and run `Calibrate` again. Then collect a fresh `Dojo` run and use
-`Trial` to compare the personal NN against the base model.
+Re-enter fullscreen and run `Calibrate` again. Then collect a fresh `Dojo` run before
+playing another room wave.
 
 The model says `Fallback`
 

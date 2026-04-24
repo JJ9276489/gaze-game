@@ -15,7 +15,7 @@ and players opt into game runs when they are ready:
    room.
 4. Allow camera access.
 5. Calibrate in fullscreen.
-6. Run a Trial, play Solo, or start a Multiplayer wave from a room.
+6. Train in the Dojo, then play Solo or start a Multiplayer wave from a room.
 
 ## Project Shape
 
@@ -139,7 +139,6 @@ Useful in-session controls:
 Game modes:
 
 - `Dojo` spawns training dummies and uses them as local NN training labels.
-- `Trial` measures held-out accuracy against fixed marks.
 - `Solo` spawns enemy waves locally.
 - `Multiplayer` starts a synchronized room wave with shared targets and relay-broadcast
   scores while still keeping webcam data local.

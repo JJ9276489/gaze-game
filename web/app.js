@@ -200,6 +200,7 @@ const elements = {
   statusLine: $("statusLine"),
   toast: $("toast"),
   secureBadge: $("secureBadge"),
+  roomScopeLabel: $("roomScopeLabel"),
   roomLabel: $("roomLabel"),
   copyRoomButton: $("copyRoomButton"),
   fullscreenButton: $("fullscreenButton"),
@@ -230,6 +231,7 @@ const state = {
   cameraFrame: 0,
   sendTimer: 0,
   ws: null,
+  sessionMode: "lobby",
   connected: false,
   running: false,
   source: "gaze",
@@ -349,6 +351,7 @@ async function startLocalDojoSession() {
   const name = (elements.nameInput.value || "Guest").trim().slice(0, 32) || "Guest";
   state.local.name = name;
   state.local.room = "DOJO";
+  state.sessionMode = "dojo";
   state.local.color = colorForName(name);
   elements.roomLabel.textContent = "DOJO";
   elements.roomLabel.title = "Local Dojo";
@@ -388,6 +391,7 @@ async function startSession(createRoom) {
 
   state.local.name = name;
   state.local.room = room;
+  state.sessionMode = "room";
   state.local.color = colorForName(name);
   elements.roomInput.value = room;
   elements.roomLabel.textContent = room;
@@ -430,6 +434,7 @@ async function startSession(createRoom) {
 
 function stopSession() {
   state.running = false;
+  state.sessionMode = "lobby";
   state.connected = false;
   state.peers.clear();
   state.waveScores.clear();
@@ -467,6 +472,7 @@ function setBusy(isBusy) {
 function showHud() {
   elements.lobby.classList.add("hidden");
   elements.hud.classList.remove("hidden");
+  syncHudContext();
   syncHudSuppression();
 }
 
@@ -474,6 +480,24 @@ function showLobby() {
   elements.hud.classList.add("hidden");
   elements.hud.classList.remove("hud-suppressed");
   elements.lobby.classList.remove("hidden");
+  syncHudContext();
+}
+
+function isLocalDojoSession() {
+  return state.sessionMode === "dojo";
+}
+
+function syncHudContext() {
+  const isDojo = isLocalDojoSession();
+  elements.roomScopeLabel.textContent = isDojo ? "Mode" : "Room";
+  elements.copyRoomButton.classList.toggle("hidden", isDojo);
+  elements.trainButton.classList.toggle("hidden", !isDojo);
+  elements.trainButton.textContent = isDojo ? "Train NN" : "Dojo";
+  elements.evaluateButton.classList.add("hidden");
+  elements.challengeButton.classList.toggle("hidden", isDojo);
+  elements.multiplayerButton.classList.toggle("hidden", isDojo);
+  elements.resetPersonalButton.classList.toggle("hidden", !isDojo);
+  refreshPersonalModelLabel();
 }
 
 function syncHudSuppression() {
@@ -2716,7 +2740,9 @@ function refreshPersonalModelLabel() {
       const direction = model.lastEvalDeltaPx >= 0 ? "better than base" : "worse than base";
       elements.personalModelMeta.textContent = `${Math.abs(Math.round(model.lastEvalDeltaPx))} px ${direction}`;
     } else {
-      elements.personalModelMeta.textContent = "Run Trial for held-out accuracy";
+      elements.personalModelMeta.textContent = isLocalDojoSession()
+        ? "Train again to refine fit"
+        : "Ready for room play";
     }
     elements.personalProgressFill.style.width = "100%";
     return;
