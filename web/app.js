@@ -152,23 +152,9 @@ const TRAIN_TARGETS = [
   { id: "train-17", x: 0.64, y: 0.78 },
   { id: "train-18", x: 0.85, y: 0.78 },
 ];
-const EVAL_TARGETS = [
-  { id: "eval-01", x: 0.24, y: 0.24 },
-  { id: "eval-02", x: 0.5, y: 0.22 },
-  { id: "eval-03", x: 0.76, y: 0.24 },
-  { id: "eval-04", x: 0.22, y: 0.5 },
-  { id: "eval-05", x: 0.51, y: 0.49 },
-  { id: "eval-06", x: 0.78, y: 0.5 },
-  { id: "eval-07", x: 0.24, y: 0.74 },
-  { id: "eval-08", x: 0.5, y: 0.76 },
-  { id: "eval-09", x: 0.76, y: 0.74 },
-];
 const TRAIN_SETTLE_MS = 360;
 const TRAIN_CAPTURE_MS = 640;
 const TRAIN_MIN_SAMPLES_PER_TARGET = 6;
-const EVAL_SETTLE_MS = 420;
-const EVAL_CAPTURE_MS = 700;
-const EVAL_MIN_SAMPLES_PER_TARGET = 6;
 const CHALLENGE_DURATION_MS = 30000;
 const CHALLENGE_TARGET_RADIUS_PX = 34;
 const CHALLENGE_DWELL_MS = 240;
@@ -187,7 +173,6 @@ const elements = {
   createButton: $("createButton"),
   joinButton: $("joinButton"),
   trainButton: $("trainButton"),
-  evaluateButton: $("evaluateButton"),
   challengeButton: $("challengeButton"),
   multiplayerButton: $("multiplayerButton"),
   calibrateButton: $("calibrateButton"),
@@ -314,9 +299,6 @@ function init() {
   });
   elements.trainButton.addEventListener("click", () => {
     void startTrainerRun("dojo");
-  });
-  elements.evaluateButton.addEventListener("click", () => {
-    void startTrainerRun("trial");
   });
   elements.challengeButton.addEventListener("click", () => {
     void startTrainerRun("solo");
@@ -493,7 +475,6 @@ function syncHudContext() {
   elements.copyRoomButton.classList.toggle("hidden", isDojo);
   elements.trainButton.classList.toggle("hidden", !isDojo);
   elements.trainButton.textContent = isDojo ? "Train NN" : "Dojo";
-  elements.evaluateButton.classList.add("hidden");
   elements.challengeButton.classList.toggle("hidden", isDojo);
   elements.multiplayerButton.classList.toggle("hidden", isDojo);
   elements.resetPersonalButton.classList.toggle("hidden", !isDojo);
@@ -774,8 +755,6 @@ function applyGazeReading(reading) {
       y: state.local.y,
       method: predicted.method,
     },
-    base: basePrediction,
-    personal: personalPrediction,
   });
   setTrackingStatus(trackingStatusFor(reading, predicted.method));
 }
@@ -1009,7 +988,6 @@ function isMultiplayerWaveMode(mode) {
 
 function trainerModeLabel(mode) {
   if (mode === "dojo") return "Dojo";
-  if (mode === "trial") return "Trial";
   if (mode === "solo") return "Solo";
   if (mode === "multiplayer") return "Multiplayer wave";
   return "Run";
@@ -1017,7 +995,6 @@ function trainerModeLabel(mode) {
 
 function trainerTargetNoun(mode) {
   if (mode === "dojo") return "dummy";
-  if (mode === "trial") return "mark";
   return "enemy";
 }
 
@@ -1071,7 +1048,7 @@ async function startTrainerRun(mode, options = {}) {
   cancelCalibration(false);
 
   const kind = state.rawReading.kind || state.modelKey;
-  if ((mode === "trial" || isWaveMode(mode)) && !state.personalModels[kind]) {
+  if (isWaveMode(mode) && !state.personalModels[kind]) {
     showToast("Enter the Dojo and train your personal NN first.");
     return;
   }
@@ -1087,7 +1064,7 @@ async function startTrainerRun(mode, options = {}) {
       ? normalizedWaveTargets(wave?.targets).length
         ? normalizedWaveTargets(wave.targets)
         : makeEnemyTargets(wave?.seed || createWaveSeed(), WAVE_TARGET_COUNT)
-      : shuffledTargets(mode === "trial" ? EVAL_TARGETS : TRAIN_TARGETS);
+      : shuffledTargets(TRAIN_TARGETS);
 
   state.waveScores.clear();
   for (const score of wave?.scores || []) {
@@ -1108,9 +1085,6 @@ async function startTrainerRun(mode, options = {}) {
     durationMs,
     samples: [],
     capturedSamples: [],
-    errors: [],
-    baseErrors: [],
-    personalErrors: [],
     score: 0,
     dwellStartedAt: 0,
     lastErrorPx: null,
@@ -1145,10 +1119,9 @@ function updateTrainerRun(reading, point) {
   }
 
   const now = performance.now();
-  const settleMs = session.mode === "trial" ? EVAL_SETTLE_MS : TRAIN_SETTLE_MS;
-  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
-  const minSamples =
-    session.mode === "trial" ? EVAL_MIN_SAMPLES_PER_TARGET : TRAIN_MIN_SAMPLES_PER_TARGET;
+  const settleMs = TRAIN_SETTLE_MS;
+  const captureMs = TRAIN_CAPTURE_MS;
+  const minSamples = TRAIN_MIN_SAMPLES_PER_TARGET;
   const target = visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
   if (!target) {
     finishTrainerRun(session);
@@ -1165,21 +1138,12 @@ function updateTrainerRun(reading, point) {
     return;
   }
 
-  if (session.mode === "dojo") {
-    const sample = createTrainingSample(reading, target, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
-    if (sample) {
-      session.samples.push(sample);
-    }
-  } else {
-    const activeError = distanceToTargetPx(point.active, target);
-    session.samples.push(activeError);
-    session.baseErrors.push(distanceToTargetPx(point.base, target));
-    if (point.personal) {
-      session.personalErrors.push(distanceToTargetPx(point.personal, target));
-    }
+  const sample = createTrainingSample(reading, target, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
+  if (sample) {
+    session.samples.push(sample);
   }
 
   if (now - session.lastUiAt > 150) {
@@ -1191,11 +1155,7 @@ function updateTrainerRun(reading, point) {
     return;
   }
 
-  if (session.mode === "dojo") {
-    session.capturedSamples.push(...session.samples);
-  } else {
-    session.errors.push(...session.samples);
-  }
+  session.capturedSamples.push(...session.samples);
 
   session.stepIndex += 1;
   if (session.stepIndex >= session.targets.length) {
@@ -1282,10 +1242,6 @@ function finishTrainerRun(session) {
     void finishTrainingRun(session);
     return;
   }
-  if (session.mode === "trial") {
-    finishEvaluationRun(session);
-    return;
-  }
   showToast(`${trainerModeLabel(session.mode)} complete: ${session.score} takedowns.`);
   window.setTimeout(hideToast, 1800);
 }
@@ -1322,32 +1278,6 @@ async function finishTrainingRun(session) {
   }
 }
 
-function finishEvaluationRun(session) {
-  if (!session.errors.length) {
-    showToast("No test samples collected.");
-    return;
-  }
-  const meanPx = mean(session.personalErrors.length ? session.personalErrors : session.errors);
-  const baseMeanPx = session.baseErrors.length ? mean(session.baseErrors) : null;
-  const improvementPx = baseMeanPx === null ? null : baseMeanPx - meanPx;
-  const model = state.personalModels[session.kind];
-  if (model) {
-    model.lastEvalMeanPx = meanPx;
-    model.lastBaseEvalMeanPx = baseMeanPx;
-    model.lastEvalDeltaPx = improvementPx;
-    model.lastEvalAt = Date.now();
-    savePersonalModels(state.personalModels);
-  }
-  refreshPersonalModelLabel();
-  if (improvementPx !== null) {
-    const direction = improvementPx >= 0 ? "better" : "worse";
-    showToast(`Trial: ${Math.round(meanPx)} px, ${Math.abs(Math.round(improvementPx))} px ${direction}.`);
-  } else {
-    showToast(`Trial complete: ${Math.round(meanPx)} px mean error.`);
-  }
-  window.setTimeout(hideToast, 2200);
-}
-
 function refreshTrainerOverlay() {
   const session = state.trainerSession;
   syncHudSuppression();
@@ -1372,7 +1302,7 @@ function refreshTrainerOverlay() {
   const total = session.targets.length;
   const label = trainerModeLabel(session.mode);
   const targetProgress = session.stepIndex / total;
-  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
+  const captureMs = TRAIN_CAPTURE_MS;
   const phaseProgress =
     session.phase === "capture"
       ? Math.min(1, (performance.now() - session.phaseStartedAt) / captureMs)
@@ -1383,11 +1313,7 @@ function refreshTrainerOverlay() {
   const targetNoun = trainerTargetNoun(session.mode);
   elements.trainerTitle.textContent =
     session.phase === "capture" ? `Hold ${targetNoun}` : `Acquire ${targetNoun}`;
-  if (session.mode === "dojo") {
-    elements.trainerBody.textContent = `${session.capturedSamples.length + session.samples.length} samples`;
-  } else {
-    elements.trainerBody.textContent = `${session.errors.length + session.samples.length} readings`;
-  }
+  elements.trainerBody.textContent = `${session.capturedSamples.length + session.samples.length} samples`;
 }
 
 function resetCurrentPersonalModel() {
@@ -1850,14 +1776,12 @@ function drawTrainerTarget(width, height) {
   const py = target.y * height;
   const now = performance.now();
   const phaseElapsed = now - (session.phaseStartedAt || now);
-  const captureMs = session.mode === "trial" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
+  const captureMs = TRAIN_CAPTURE_MS;
   const warmup = Math.min(1, phaseElapsed / captureMs);
   const isCapture = session.phase === "capture" || isWaveMode(session.mode);
 
   if (session.mode === "dojo") {
     drawDojoDummy(px, py, warmup, isCapture);
-  } else if (session.mode === "trial") {
-    drawTrialMark(px, py, warmup, isCapture);
   } else if (isWaveMode(session.mode)) {
     const dwellProgress = session.dwellStartedAt
       ? clamp01((now - session.dwellStartedAt) / CHALLENGE_DWELL_MS)
@@ -1902,28 +1826,6 @@ function drawDojoDummy(px, py, warmup, isCapture) {
   roundRect(ctx, px - 16, py + 6, 32, 34, 8);
   ctx.fill();
 
-  drawTargetGlyph(px, py, radius, "rgba(156, 255, 210, 0.98)");
-  ctx.restore();
-}
-
-function drawTrialMark(px, py, warmup, isCapture) {
-  const radius = 20 + warmup * 14;
-  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
-  const stroke = isCapture ? "rgba(156, 255, 210, 0.96)" : "rgba(117, 216, 255, 0.94)";
-
-  ctx.save();
-  ctx.shadowBlur = 30;
-  ctx.shadowColor = stroke;
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(px, py, radius + pulse * 5, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(238, 243, 255, 0.58)";
-  ctx.beginPath();
-  ctx.arc(px, py, radius * 0.58, 0, Math.PI * 2);
-  ctx.stroke();
   drawTargetGlyph(px, py, radius, "rgba(156, 255, 210, 0.98)");
   ctx.restore();
 }
@@ -2724,7 +2626,6 @@ function refreshPersonalModelLabel() {
   const sampleCount = samplesForKind(state.trainingSamples, kind).length;
   const model = state.personalModels[kind];
   const hasPersonalData = Boolean(model) || sampleCount > 0;
-  elements.evaluateButton.disabled = !model;
   elements.challengeButton.disabled = !model;
   elements.multiplayerButton.disabled = !model;
   elements.resetPersonalButton.disabled = !hasPersonalData;
@@ -2732,18 +2633,10 @@ function refreshPersonalModelLabel() {
   elements.personalProgressFill.style.width = `${Math.round(progress * 100)}%`;
   if (model) {
     const fit = Number.isFinite(model.fitMeanPx) ? `fit ${Math.round(model.fitMeanPx)} px` : "trained";
-    const evalText = Number.isFinite(model.lastEvalMeanPx)
-      ? ` · test ${Math.round(model.lastEvalMeanPx)} px`
-      : "";
-    elements.personalModelLabel.textContent = `${model.sampleCount || sampleCount} samples · ${fit}${evalText}`;
-    if (Number.isFinite(model.lastEvalDeltaPx)) {
-      const direction = model.lastEvalDeltaPx >= 0 ? "better than base" : "worse than base";
-      elements.personalModelMeta.textContent = `${Math.abs(Math.round(model.lastEvalDeltaPx))} px ${direction}`;
-    } else {
-      elements.personalModelMeta.textContent = isLocalDojoSession()
-        ? "Train again to refine fit"
-        : "Ready for room play";
-    }
+    elements.personalModelLabel.textContent = `${model.sampleCount || sampleCount} samples · ${fit}`;
+    elements.personalModelMeta.textContent = isLocalDojoSession()
+      ? "Train again to refine fit"
+      : "Ready for room play";
     elements.personalProgressFill.style.width = "100%";
     return;
   }
