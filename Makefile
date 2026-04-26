@@ -13,6 +13,7 @@ check-js:
 	node --check web/gaze_runtime.js
 	node --check web/renderer.js
 	node --check web/trainer_session.js
+	node --check web/ui_state.js
 
 check-python:
 	$(PYTHON) -m py_compile relay_server.py shared_gaze/*.py scripts/*.py

@@ -66,6 +66,15 @@ import {
   trainerOverlayView,
   trainerWaveScoreMap,
 } from "./trainer_session.js";
+import {
+  colorForName,
+  controlsHiddenView,
+  generateRoomCode,
+  hudContextView,
+  normalizePlayerName,
+  normalizeRoom,
+  personalModelView,
+} from "./ui_state.js";
 
 const CALIBRATION_SETTLE_MS = 600;
 const CALIBRATION_CAPTURE_MS = 900;
@@ -237,7 +246,7 @@ async function startLocalDojoSession() {
   state.source = "gaze";
   elements.mouseModeInput.checked = false;
 
-  const name = (elements.nameInput.value || "Guest").trim().slice(0, 32) || "Guest";
+  const name = normalizePlayerName(elements.nameInput.value);
   state.local.name = name;
   state.local.room = "DOJO";
   state.sessionMode = "dojo";
@@ -270,7 +279,7 @@ async function startSession(createRoom) {
   hideToast();
   state.source = elements.mouseModeInput.checked ? "mouse" : "gaze";
 
-  const name = (elements.nameInput.value || "Guest").trim().slice(0, 32) || "Guest";
+  const name = normalizePlayerName(elements.nameInput.value);
   const room = normalizeRoom(elements.roomInput.value || (createRoom ? generateRoomCode() : ""));
   if (!room) {
     setBusy(false);
@@ -372,19 +381,15 @@ function showLobby() {
   syncHudContext();
 }
 
-function isLocalDojoSession() {
-  return state.sessionMode === "dojo";
-}
-
 function syncHudContext() {
-  const isDojo = isLocalDojoSession();
-  elements.roomScopeLabel.textContent = isDojo ? "Mode" : "Room";
-  elements.copyRoomButton.classList.toggle("hidden", isDojo);
-  elements.trainButton.classList.toggle("hidden", !isDojo);
-  elements.trainButton.textContent = isDojo ? "Train NN" : "Dojo";
-  elements.challengeButton.classList.toggle("hidden", isDojo);
-  elements.multiplayerButton.classList.toggle("hidden", isDojo);
-  elements.resetPersonalButton.classList.toggle("hidden", !isDojo);
+  const view = hudContextView(state.sessionMode);
+  elements.roomScopeLabel.textContent = view.roomScopeLabel;
+  elements.copyRoomButton.classList.toggle("hidden", view.copyRoomHidden);
+  elements.trainButton.classList.toggle("hidden", view.trainHidden);
+  elements.trainButton.textContent = view.trainText;
+  elements.challengeButton.classList.toggle("hidden", view.challengeHidden);
+  elements.multiplayerButton.classList.toggle("hidden", view.multiplayerHidden);
+  elements.resetPersonalButton.classList.toggle("hidden", view.resetPersonalHidden);
   refreshPersonalModelLabel();
 }
 
@@ -395,16 +400,14 @@ function syncHudSuppression() {
 
 function setControlsHidden(hidden, persist = true) {
   state.controlsHidden = Boolean(hidden);
-  elements.hud.classList.toggle("hud-controls-hidden", state.controlsHidden);
-  elements.toggleControlsButton.textContent = state.controlsHidden ? "Show buttons" : "Hide buttons";
-  elements.toggleControlsButton.setAttribute("aria-expanded", String(!state.controlsHidden));
-  elements.toggleControlsButton.setAttribute("aria-pressed", String(state.controlsHidden));
-  elements.toggleControlsButton.setAttribute(
-    "aria-label",
-    state.controlsHidden ? "Show buttons" : "Hide buttons",
-  );
+  const view = controlsHiddenView(state.controlsHidden);
+  elements.hud.classList.toggle("hud-controls-hidden", view.hidden);
+  elements.toggleControlsButton.textContent = view.buttonText;
+  elements.toggleControlsButton.setAttribute("aria-expanded", view.ariaExpanded);
+  elements.toggleControlsButton.setAttribute("aria-pressed", view.ariaPressed);
+  elements.toggleControlsButton.setAttribute("aria-label", view.ariaLabel);
   if (persist) {
-    localStorage.setItem("gazeGame.controlsHidden", state.controlsHidden ? "1" : "0");
+    localStorage.setItem("gazeGame.controlsHidden", view.storageValue);
   }
 }
 
@@ -1268,91 +1271,21 @@ function averagePoint(samples) {
   return [sumX / Math.max(samples.length, 1), sumY / Math.max(samples.length, 1)];
 }
 
-function normalizeRoom(value) {
-  const compact = (value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
-  if (!compact) {
-    return "";
-  }
-  if (compact.length === 6) {
-    return `${compact.slice(0, 3)}-${compact.slice(3)}`;
-  }
-  return compact;
-}
-
-function generateRoomCode() {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let prefix = "";
-  for (let index = 0; index < 3; index += 1) {
-    prefix += letters[Math.floor(Math.random() * letters.length)];
-  }
-  const suffix = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
-  return `${prefix}-${suffix}`;
-}
-
-function colorForName(name) {
-  let hash = 0;
-  for (let index = 0; index < name.length; index += 1) {
-    hash = (hash * 31 + name.charCodeAt(index)) >>> 0;
-  }
-  const hue = (hash % 360) / 360;
-  return hslToRgb(hue, 0.74, 0.62);
-}
-
-function hslToRgb(h, s, l) {
-  const hueToRgb = (p, q, t) => {
-    let value = t;
-    if (value < 0) value += 1;
-    if (value > 1) value -= 1;
-    if (value < 1 / 6) return p + (q - p) * 6 * value;
-    if (value < 1 / 2) return q;
-    if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
-    return p;
-  };
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [
-    Math.round(hueToRgb(p, q, h + 1 / 3) * 255),
-    Math.round(hueToRgb(p, q, h) * 255),
-    Math.round(hueToRgb(p, q, h - 1 / 3) * 255),
-  ];
-}
-
 function refreshPersonalModelLabel() {
   const kind = state.modelKey;
-  const sampleCount = samplesForKind(state.trainingSamples, kind).length;
-  const stats = personalStatsForKind(state.personalStats, kind, state.trainingSamples);
-  const totalSamples = Math.max(
-    stats.totalSamples,
-    Number(state.personalModels[kind]?.totalSampleCount) || 0,
-    Number(state.personalModels[kind]?.sampleCount) || 0,
-    sampleCount,
-  );
-  const model = state.personalModels[kind];
-  const hasPersonalData = Boolean(model) || sampleCount > 0;
-  elements.challengeButton.disabled = !model;
-  elements.multiplayerButton.disabled = !model;
-  elements.resetPersonalButton.disabled = !hasPersonalData;
-  const progress = clamp01(sampleCount / PERSONAL_MIN_SAMPLES);
-  elements.personalProgressFill.style.width = `${Math.round(progress * 100)}%`;
-  if (model) {
-    const fit = Number.isFinite(model.fitMeanPx) ? `fit ${Math.round(model.fitMeanPx)} px` : "trained";
-    elements.personalModelLabel.textContent = `${totalSamples} samples · ${fit}`;
-    elements.personalModelMeta.textContent =
-      totalSamples > sampleCount
-        ? `${sampleCount} retained for training`
-        : isLocalDojoSession()
-          ? "Train again to refine fit"
-          : "Ready for room play";
-    elements.personalProgressFill.style.width = "100%";
-    return;
-  }
-  if (sampleCount > 0) {
-    elements.personalModelLabel.textContent = `${totalSamples}/${PERSONAL_MIN_SAMPLES} samples`;
-    elements.personalModelMeta.textContent = "Keep training";
-    return;
-  }
-  elements.personalModelLabel.textContent = "No data";
-  elements.personalModelMeta.textContent = "Local only";
+  const view = personalModelView({
+    kind,
+    trainingSamples: state.trainingSamples,
+    personalStats: state.personalStats,
+    personalModels: state.personalModels,
+    isDojo: state.sessionMode === "dojo",
+  });
+  elements.challengeButton.disabled = view.challengeDisabled;
+  elements.multiplayerButton.disabled = view.multiplayerDisabled;
+  elements.resetPersonalButton.disabled = view.resetDisabled;
+  elements.personalProgressFill.style.width = `${view.progressPercent}%`;
+  elements.personalModelLabel.textContent = view.label;
+  elements.personalModelMeta.textContent = view.meta;
 }
 
 function visibleOverlayTarget(target, dockSelector) {
