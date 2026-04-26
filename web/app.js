@@ -2,8 +2,6 @@ import {
   PERSONAL_MIN_SAMPLES,
   appendTrainingSamples,
   buildPersonalFeatureVector,
-  createTrainingSample,
-  distancePx,
   clearPersonalStatsForKind,
   loadPersonalModels,
   loadPersonalStats,
@@ -25,7 +23,6 @@ import {
   isWaveMode,
   makeEnemyTargets,
   normalizeRelayWave,
-  normalizedWaveTargets,
 } from "./game_logic.js";
 import {
   CALIBRATION_TARGETS,
@@ -49,6 +46,17 @@ import {
   sendRelayMessage,
 } from "./relay_client.js";
 import { renderStage } from "./renderer.js";
+import {
+  CHALLENGE_DWELL_MS,
+  CHALLENGE_TARGET_RADIUS_PX,
+  TRAIN_CAPTURE_MS,
+  advanceTrainerSession,
+  createTrainerSession,
+  currentTrainerTarget,
+  trainerModeLabel,
+  trainerOverlayView,
+  trainerWaveScoreMap,
+} from "./trainer_session.js";
 
 const TASKS_VERSION = "0.10.34";
 const TASKS_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}`;
@@ -158,32 +166,6 @@ const DEFAULT_GAZE_MODEL_KEY = "spatial_geom";
 const CALIBRATION_SETTLE_MS = 600;
 const CALIBRATION_CAPTURE_MS = 900;
 const CALIBRATION_MIN_SAMPLES = 10;
-
-const TRAIN_TARGETS = [
-  { id: "train-01", x: 0.15, y: 0.16 },
-  { id: "train-02", x: 0.36, y: 0.16 },
-  { id: "train-03", x: 0.64, y: 0.16 },
-  { id: "train-04", x: 0.85, y: 0.16 },
-  { id: "train-05", x: 0.22, y: 0.34 },
-  { id: "train-06", x: 0.48, y: 0.34 },
-  { id: "train-07", x: 0.73, y: 0.34 },
-  { id: "train-08", x: 0.15, y: 0.52 },
-  { id: "train-09", x: 0.36, y: 0.52 },
-  { id: "train-10", x: 0.64, y: 0.52 },
-  { id: "train-11", x: 0.85, y: 0.52 },
-  { id: "train-12", x: 0.27, y: 0.68 },
-  { id: "train-13", x: 0.52, y: 0.68 },
-  { id: "train-14", x: 0.78, y: 0.68 },
-  { id: "train-15", x: 0.15, y: 0.78 },
-  { id: "train-16", x: 0.36, y: 0.78 },
-  { id: "train-17", x: 0.64, y: 0.78 },
-  { id: "train-18", x: 0.85, y: 0.78 },
-];
-const TRAIN_SETTLE_MS = 360;
-const TRAIN_CAPTURE_MS = 640;
-const TRAIN_MIN_SAMPLES_PER_TARGET = 6;
-const CHALLENGE_TARGET_RADIUS_PX = 34;
-const CHALLENGE_DWELL_MS = 240;
 
 const $ = (id) => document.getElementById(id);
 
@@ -1004,18 +986,6 @@ async function maybeEnterFullscreen() {
   await enterFullscreen(false);
 }
 
-function trainerModeLabel(mode) {
-  if (mode === "dojo") return "Dojo";
-  if (mode === "solo") return "Solo";
-  if (mode === "multiplayer") return "Multiplayer wave";
-  return "Run";
-}
-
-function trainerTargetNoun(mode) {
-  if (mode === "dojo") return "dummy";
-  return "enemy";
-}
-
 async function requestMultiplayerWaveFromUser() {
   if (!state.connected || !relayIsOpen(state.ws)) {
     showToast("Join or create a room before starting multiplayer.");
@@ -1069,44 +1039,18 @@ async function startTrainerRun(mode, options = {}) {
     showToast("Enter the Dojo and train your personal NN first.");
     return;
   }
-  const now = performance.now();
   const wave = options.wave || null;
-  const durationMs = Number(wave?.durationMs) || CHALLENGE_DURATION_MS;
-  const remainingMs =
-    isWaveMode(mode) && Number.isFinite(wave?.startedAt)
-      ? Math.max(1000, wave.startedAt + durationMs - Date.now())
-      : durationMs;
-  const targets =
-    isWaveMode(mode)
-      ? normalizedWaveTargets(wave?.targets).length
-        ? normalizedWaveTargets(wave.targets)
-        : makeEnemyTargets(wave?.seed || createWaveSeed(), WAVE_TARGET_COUNT)
-      : shuffledTargets(TRAIN_TARGETS);
-
   state.waveScores.clear();
-  for (const score of wave?.scores || []) {
+  for (const score of trainerWaveScoreMap(wave).values()) {
     state.waveScores.set(score.id, score);
   }
-  state.trainerSession = {
-    active: true,
+  state.trainerSession = createTrainerSession({
     mode,
     kind,
-    waveId: wave?.id || `solo-${Date.now()}`,
-    seed: wave?.seed || "",
-    targets,
-    stepIndex: 0,
-    phase: isWaveMode(mode) ? "active" : "settle",
-    phaseStartedAt: now,
-    startedAt: now,
-    endsAt: isWaveMode(mode) ? now + remainingMs : 0,
-    durationMs,
-    samples: [],
-    capturedSamples: [],
-    score: 0,
-    dwellStartedAt: 0,
-    lastErrorPx: null,
-    lastUiAt: 0,
-  };
+    wave,
+    now: performance.now(),
+    wallNow: Date.now(),
+  });
   refreshTrainerOverlay();
 }
 
@@ -1125,115 +1069,33 @@ function updateTrainerRun(reading, point) {
   if (!session?.active) {
     return;
   }
-  if (reading.kind !== session.kind) {
-    elements.trainerBody.textContent = "Model changed. Start a new run.";
-    return;
-  }
-
-  if (isWaveMode(session.mode)) {
-    updateWaveRun(session, point.active);
-    return;
-  }
-
-  const now = performance.now();
-  const settleMs = TRAIN_SETTLE_MS;
-  const captureMs = TRAIN_CAPTURE_MS;
-  const minSamples = TRAIN_MIN_SAMPLES_PER_TARGET;
-  const target = visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
-  if (!target) {
-    finishTrainerRun(session);
-    return;
-  }
-
-  if (session.phase === "settle") {
-    if (now - session.phaseStartedAt >= settleMs) {
-      session.phase = "capture";
-      session.phaseStartedAt = now;
-      session.samples = [];
-      refreshTrainerOverlay();
-    }
-    return;
-  }
-
-  const sample = createTrainingSample(reading, target, {
-    width: window.innerWidth,
-    height: window.innerHeight,
+  const result = advanceTrainerSession(session, {
+    reading,
+    activePoint: point.active,
+    now: performance.now(),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    targetMapper: trainerTargetForOverlay,
   });
-  if (sample) {
-    session.samples.push(sample);
-  }
 
-  if (now - session.lastUiAt > 150) {
-    session.lastUiAt = now;
-    refreshTrainerOverlay();
-  }
-
-  if (now - session.phaseStartedAt < captureMs || session.samples.length < minSamples) {
+  if (result.type === "kind_mismatch") {
+    elements.trainerBody.textContent = result.message;
     return;
   }
-
-  session.capturedSamples.push(...session.samples);
-
-  session.stepIndex += 1;
-  if (session.stepIndex >= session.targets.length) {
+  if (result.hitTarget && session.mode === "multiplayer") {
+    sendWaveHit(session, result.hitTarget);
+  }
+  if (result.complete) {
     finishTrainerRun(session);
     return;
   }
-
-  session.phase = "settle";
-  session.phaseStartedAt = now;
-  session.samples = [];
-  refreshTrainerOverlay();
-}
-
-function updateWaveRun(session, point) {
-  const now = performance.now();
-  if (now >= session.endsAt) {
-    finishTrainerRun(session);
-    return;
-  }
-
-  const target = currentTrainerTarget(session);
-  if (!target) {
-    finishTrainerRun(session);
-    return;
-  }
-  const errorPx = distanceToTargetPx(point, target);
-  session.lastErrorPx = errorPx;
-  if (errorPx <= CHALLENGE_TARGET_RADIUS_PX) {
-    if (!session.dwellStartedAt) {
-      session.dwellStartedAt = now;
-    }
-    if (now - session.dwellStartedAt >= CHALLENGE_DWELL_MS) {
-      session.score += 1;
-      if (session.mode === "multiplayer") {
-        sendWaveHit(session, target);
-      }
-      session.stepIndex += 1;
-      session.dwellStartedAt = 0;
-      session.phaseStartedAt = now;
-    }
-  } else {
-    session.dwellStartedAt = 0;
-  }
-
-  if (now - session.lastUiAt > 150) {
-    session.lastUiAt = now;
+  if (result.refresh) {
     refreshTrainerOverlay();
   }
 }
 
-function currentTrainerTarget(session) {
-  if (!session?.targets?.length) {
-    return null;
-  }
-  if (isWaveMode(session.mode)) {
-    return visibleOverlayTarget(
-      session.targets[session.stepIndex % session.targets.length],
-      ".trainer-dock",
-    );
-  }
-  return visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
+function trainerTargetForOverlay(target) {
+  return visibleOverlayTarget(target, ".trainer-dock");
 }
 
 function sendWaveHit(session, target) {
@@ -1305,41 +1167,19 @@ async function finishTrainingRun(session) {
 }
 
 function refreshTrainerOverlay() {
-  const session = state.trainerSession;
+  const view = trainerOverlayView(state.trainerSession, { now: performance.now() });
   syncHudSuppression();
-  if (!session?.active) {
+  if (view.hidden) {
     elements.trainerOverlay.classList.add("hidden");
     elements.trainerProgressFill.style.width = "0%";
     return;
   }
 
   elements.trainerOverlay.classList.remove("hidden");
-  if (isWaveMode(session.mode)) {
-    const secondsLeft = Math.max(0, Math.ceil((session.endsAt - performance.now()) / 1000));
-    const progress = clamp01((performance.now() - session.startedAt) / session.durationMs);
-    elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
-    elements.trainerStep.textContent = `${trainerModeLabel(session.mode)} · ${secondsLeft}s`;
-    elements.trainerTitle.textContent = `${session.score} takedowns`;
-    elements.trainerBody.textContent =
-      session.lastErrorPx === null ? "Acquire enemies." : `${Math.round(session.lastErrorPx)} px`;
-    return;
-  }
-
-  const total = session.targets.length;
-  const label = trainerModeLabel(session.mode);
-  const targetProgress = session.stepIndex / total;
-  const captureMs = TRAIN_CAPTURE_MS;
-  const phaseProgress =
-    session.phase === "capture"
-      ? Math.min(1, (performance.now() - session.phaseStartedAt) / captureMs)
-      : 0;
-  const progress = targetProgress + phaseProgress / total;
-  elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
-  elements.trainerStep.textContent = `${label} ${session.stepIndex + 1} of ${total}`;
-  const targetNoun = trainerTargetNoun(session.mode);
-  elements.trainerTitle.textContent =
-    session.phase === "capture" ? `Hold ${targetNoun}` : `Acquire ${targetNoun}`;
-  elements.trainerBody.textContent = `${session.capturedSamples.length + session.samples.length} samples`;
+  elements.trainerProgressFill.style.width = `${view.progressPercent}%`;
+  elements.trainerStep.textContent = view.step;
+  elements.trainerTitle.textContent = view.title;
+  elements.trainerBody.textContent = view.body;
 }
 
 function resetCurrentPersonalModel() {
@@ -1569,7 +1409,9 @@ function drawStage() {
       ? visibleOverlayTarget(CALIBRATION_TARGETS[state.calibrationSession.stepIndex], ".calibration-card")
       : null,
     trainerSession: state.trainerSession,
-    trainerTarget: state.trainerSession?.active ? currentTrainerTarget(state.trainerSession) : null,
+    trainerTarget: state.trainerSession?.active
+      ? currentTrainerTarget(state.trainerSession, trainerTargetForOverlay)
+      : null,
     waveScores: state.waveScores,
     trainCaptureMs: TRAIN_CAPTURE_MS,
     challengeDwellMs: CHALLENGE_DWELL_MS,
@@ -2085,31 +1927,6 @@ function refreshPersonalModelLabel() {
   }
   elements.personalModelLabel.textContent = "No data";
   elements.personalModelMeta.textContent = "Local only";
-}
-
-function shuffledTargets(targets) {
-  const copy = targets.map((target) => ({ ...target }));
-  shuffleInPlace(copy, Math.random);
-  return copy;
-}
-
-function shuffleInPlace(items, random) {
-  for (let index = items.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
-  }
-  return items;
-}
-
-function distanceToTargetPx(point, target) {
-  return distancePx(
-    point.x,
-    point.y,
-    target.x,
-    target.y,
-    Math.max(1, window.innerWidth),
-    Math.max(1, window.innerHeight),
-  );
 }
 
 function visibleOverlayTarget(target, dockSelector) {
