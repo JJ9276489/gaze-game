@@ -24,8 +24,6 @@ and players opt into game runs when they are ready:
 - `scripts/export_browser_onnx.py` exports the local PyTorch gaze checkpoint for browser
   inference.
 - `scripts/verify_browser_onnx.py` checks ONNX output against the PyTorch model.
-- The legacy Python/macOS client remains in the repo as a benchmark path, not the primary
-  user experience.
 
 ## Privacy Boundary
 
@@ -45,7 +43,6 @@ git clone git@github.com:JJ9276489/gaze-game.git
 cd gaze-game
 python3.11 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt        # legacy Python client + dev
 python -m pip install -r requirements-relay.txt  # relay-only host
 python -m pip install -r requirements-dev.txt    # also gets ONNX export/verify
 ```
@@ -70,11 +67,10 @@ python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-Legacy Python/macOS path:
+Local PyTorch checkpoint used by export/verify:
 
 ```text
 models/vision_gaze_spatial_geom.pt
-models/face_landmarker.task
 ```
 
 ## Local Run
@@ -124,21 +120,3 @@ and operator controls.
 - [Browser alpha operator notes](docs/browser-alpha.md)
 - [Alpha tester guide](docs/alpha-tester-guide.md)
 - [Relay operations](docs/relay-operations.md)
-
-## Legacy Mac App
-
-The packaged macOS app is retained for local comparison with the original PyTorch
-runtime:
-
-```bash
-./scripts/build_macos_app.sh
-```
-
-The build output is ignored:
-
-```text
-dist/Gaze Game.app
-dist/Gaze-Game-alpha-macos-arm64.zip
-```
-
-`relay_urls.example.txt` documents the old packaged-alpha relay URL mechanism.

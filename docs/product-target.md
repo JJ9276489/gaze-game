@@ -28,25 +28,10 @@ For local development, the default relay is:
 ws://127.0.0.1:8765
 ```
 
-The packaged macOS app is still useful as a benchmark against the original PyTorch
-runtime, but it is not the primary user path.
-
 ## Camera Permission
 
 For the browser version, Camera permission belongs to the HTTPS origin. Remote browser
 tests must use HTTPS; local tests can use `localhost`.
-
-For the packaged macOS app, Camera permission must belong to the shipped app bundle. A
-packaged macOS app needs an `NSCameraUsageDescription` entry in `Info.plist`. Running
-from Codex or Terminal is a developer-only path and may attribute camera permission to
-the parent app instead of the final product.
-
-The macOS app copy in this repo uses:
-
-```text
-Gaze Game uses your camera locally to estimate gaze. Video, eye crops, and face
-landmarks never leave your Mac.
-```
 
 The browser client should eventually show an equivalent line that swaps "your Mac" for
 "your device" near the camera prompt.

@@ -6,7 +6,6 @@ from torch import nn
 from shared_gaze.config import (
     EYE_CROP_HEIGHT,
     EYE_CROP_WIDTH,
-    VISION_EYE_GEOMETRY_FEATURE_KEYS,
     VISION_HEAD_FEATURE_KEYS,
 )
 
@@ -62,19 +61,6 @@ class EyeCropModelConfig:
             patch_heads=int(payload.get("patch_heads", defaults.patch_heads)),
             patch_dropout=float(payload.get("patch_dropout", defaults.patch_dropout)),
         )
-
-
-def spatial_geometry_frame_vision_config() -> EyeCropModelConfig:
-    return EyeCropModelConfig(
-        encoder_channels=(24, 48, 96, 96),
-        encoder_pooling="flatten",
-        eye_coord_channels=True,
-        head_hidden_dims=(48, 48),
-        extra_feature_keys=tuple(VISION_EYE_GEOMETRY_FEATURE_KEYS),
-        extra_hidden_dims=(48, 48),
-        regressor_hidden_dims=(256, 128),
-        dropout=0.15,
-    )
 
 
 class EyeEncoder(nn.Module):
@@ -295,4 +281,3 @@ class EyeCropRegressor(nn.Module):
         x_grid = x_coords.view(1, 1, 1, width).expand(batch_size, 1, height, width)
         y_grid = y_coords.view(1, 1, height, 1).expand(batch_size, 1, height, width)
         return torch.cat([eye, x_grid, y_grid], dim=1)
-

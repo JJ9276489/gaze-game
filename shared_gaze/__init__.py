@@ -1,2 +1,1 @@
-"""Shared gaze-cursor game runtime."""
-
+"""Gaze Ninja relay and browser model export support."""

@@ -123,9 +123,9 @@ See [alpha-tester-guide.md](alpha-tester-guide.md#screen-controls).
 
 ## Chromebook Notes
 
-Chromebooks should use the browser alpha, not the macOS app. Use Chrome, keep Tailscale
-connected, and open the HTTPS URL. If camera gaze is unreliable, open Connection, enable
-Mouse mode, and join the same room to validate networking.
+Chromebooks should use Chrome, keep Tailscale connected, and open the HTTPS URL. If
+camera gaze is unreliable, open Connection, enable Mouse mode, and join the same room to
+validate networking.
 
 ## Troubleshooting
 
