@@ -248,7 +248,7 @@ export function loadTrainingSamples() {
 }
 
 export function saveTrainingSamples(samples) {
-  const capped = capTrainingSamples(samples);
+  const capped = capTrainingSamples(samples.filter(isUsableTrainingSample));
   try {
     localStorage.setItem(
       PERSONAL_STORAGE_DATASET_KEY,

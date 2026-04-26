@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:js": "node --check web/app.js && node --check web/personal_model.js && node --check web/game_logic.js",
+    "test:js": "node --test web/*.test.mjs"
+  }
+}

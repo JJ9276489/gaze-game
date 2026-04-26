@@ -94,6 +94,18 @@ mode` under `Connection`.
 See [docs/alpha-tester-guide.md](docs/alpha-tester-guide.md) for in-session screen
 controls and the Dojo / Solo / Multiplayer game modes.
 
+## Checks
+
+Run the lightweight repo checks before pushing browser or relay changes:
+
+```bash
+make check
+```
+
+This runs JavaScript syntax checks, Python syntax checks, Node unit tests for browser
+logic, and Python unit tests for relay state. ONNX export/verify remains a separate check
+for model changes.
+
 ## Private Remote Run
 
 For early remote tests, keep the relay bound to localhost and expose it through private
