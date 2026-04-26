@@ -123,8 +123,8 @@ Send testers the generated `https://...ts.net` URL and a room code. Browser came
 requires HTTPS for remote pages.
 
 Do not expose the included unauthenticated relay to the public internet. Before public
-testing, add authentication, room limits, rate limits, message-size limits, idle cleanup,
-and operator controls.
+testing, add authentication, rate limits, idle cleanup, structured logs, and operator
+controls.
 
 ## Docs
 

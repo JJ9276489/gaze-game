@@ -2,6 +2,7 @@ import unittest
 
 from shared_gaze.protocol import clamp01, decode, encode
 from shared_gaze.relay_server import (
+    MAX_CLIENTS_PER_ROOM,
     MAX_WAVE_DURATION_MS,
     RelayClient,
     RelayState,
@@ -40,6 +41,20 @@ class RelayStateTests(unittest.TestCase):
         state.leave_room(client)
         self.assertIsNone(client.room)
         self.assertNotIn("ROOM-B", state.rooms)
+
+    def test_room_capacity_rejects_extra_clients(self) -> None:
+        state = RelayState()
+        clients = [
+            RelayClient(id=f"client-{index}", websocket=None)
+            for index in range(MAX_CLIENTS_PER_ROOM)
+        ]
+        for client in clients:
+            self.assertTrue(state.can_join_room(client, "ROOM"))
+            state.join_room(client, "ROOM")
+
+        extra_client = RelayClient(id="client-extra", websocket=None)
+        self.assertFalse(state.can_join_room(extra_client, "ROOM"))
+        self.assertTrue(state.can_join_room(clients[0], "ROOM"))
 
     def test_active_wave_is_room_scoped_and_reused_until_expiry(self) -> None:
         state = RelayState()

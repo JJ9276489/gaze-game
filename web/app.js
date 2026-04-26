@@ -1403,6 +1403,14 @@ function connectRelay() {
         return;
       }
 
+      if (message.type === "error" && !settled) {
+        settled = true;
+        window.clearTimeout(timeout);
+        ws.close();
+        reject(new Error(`Relay rejected join: ${message.message || "unknown_error"}`));
+        return;
+      }
+
       if (message.type === "welcome") {
         state.local.id = message.id;
         state.connected = true;
@@ -1456,6 +1464,12 @@ function connectRelay() {
 }
 
 function handleRelayMessage(message) {
+  if (message.type === "error") {
+    showToast(`Relay error: ${message.message || "unknown_error"}`);
+    window.setTimeout(hideToast, 1800);
+    return;
+  }
+
   if (message.type === "peer_join") {
     state.peers.set(message.id, {
       id: message.id,

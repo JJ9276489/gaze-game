@@ -29,6 +29,9 @@ per room, broadcasts `wave_start` to everyone in that room, includes the active 
 `welcome` for late joiners, and broadcasts sanitized `wave_score` updates after clients
 send `wave_hit`.
 
+The alpha relay also caps websocket message size and room occupancy. It is still not a
+public matchmaking or anti-cheat server.
+
 ## Private Alpha Deployment
 
 For early remote tests, host the relay on a machine reachable by all testers through a
@@ -71,9 +74,7 @@ add:
 
 - TLS, usually by terminating `wss://` at a reverse proxy or hosting platform
 - room-code authorization
-- message-size limits
 - per-client rate limits
-- max clients per room
 - idle timeout cleanup
 - structured logs and basic metrics
 - authoritative wave scoring or explicit anti-cheat boundaries

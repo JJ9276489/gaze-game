@@ -22,6 +22,8 @@ DEFAULT_WEB_DIR = PROJECT_ROOT / "web"
 MAX_WAVE_TARGETS = 120
 DEFAULT_WAVE_DURATION_MS = 30_000
 MAX_WAVE_DURATION_MS = 120_000
+MAX_CLIENTS_PER_ROOM = 8
+MAX_MESSAGE_BYTES = 16 * 1024
 
 
 @dataclass
@@ -43,6 +45,10 @@ class RelayState:
         self.leave_room(client)
         client.room = room
         self.rooms.setdefault(room, {})[client.id] = client
+
+    def can_join_room(self, client: RelayClient, room: str) -> bool:
+        room_clients = self.rooms.get(room, {})
+        return client.id in room_clients or len(room_clients) < MAX_CLIENTS_PER_ROOM
 
     def leave_room(self, client: RelayClient) -> None:
         if client.room is None:
@@ -236,6 +242,9 @@ async def handle_client(websocket, state: RelayState) -> None:
             message_type = message.get("type")
             if message_type == "join":
                 room = clean_room(message.get("room"))
+                if not state.can_join_room(client, room):
+                    await websocket.send(encode({"type": "error", "message": "room_full"}))
+                    continue
                 client.name = clean_name(message.get("name"))
                 client.color = parse_color(message.get("color"))
                 state.join_room(client, room)
@@ -406,6 +415,7 @@ async def run_server(host: str, port: int, web_dir: Path | None = DEFAULT_WEB_DI
         host,
         port,
         process_request=process_request,
+        max_size=MAX_MESSAGE_BYTES,
     ):
         print(f"Gaze relay listening on ws://{host}:{port}")
         if process_request is not None:
