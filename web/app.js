@@ -37,6 +37,17 @@ import {
   mapPointWithCalibration,
   saveCalibration,
 } from "./calibration_logic.js";
+import {
+  RELAY_SEND_INTERVAL_MS,
+  buildCursorMessage,
+  buildWaveHitMessage,
+  buildWaveStartMessage,
+  connectRelaySocket,
+  defaultRelayUrl,
+  normalizeRelayUrl,
+  relayIsOpen,
+  sendRelayMessage,
+} from "./relay_client.js";
 
 const TASKS_VERSION = "0.10.34";
 const TASKS_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}`;
@@ -1005,7 +1016,7 @@ function trainerTargetNoun(mode) {
 }
 
 async function requestMultiplayerWaveFromUser() {
-  if (!state.connected || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
+  if (!state.connected || !relayIsOpen(state.ws)) {
     showToast("Join or create a room before starting multiplayer.");
     return;
   }
@@ -1026,14 +1037,13 @@ async function requestMultiplayerWaveFromUser() {
   hideToast();
   await maybeEnterFullscreen();
   const seed = createWaveSeed();
-  state.ws.send(
-    JSON.stringify({
-      type: "wave_start",
+  sendRelayMessage(
+    state.ws,
+    buildWaveStartMessage({
       room: state.local.room,
       seed,
-      duration_ms: CHALLENGE_DURATION_MS,
+      durationMs: CHALLENGE_DURATION_MS,
       targets: makeEnemyTargets(seed, WAVE_TARGET_COUNT),
-      ts: Date.now(),
     }),
   );
 }
@@ -1226,17 +1236,16 @@ function currentTrainerTarget(session) {
 }
 
 function sendWaveHit(session, target) {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.connected) {
+  if (!state.connected || !relayIsOpen(state.ws)) {
     return;
   }
-  state.ws.send(
-    JSON.stringify({
-      type: "wave_hit",
+  sendRelayMessage(
+    state.ws,
+    buildWaveHitMessage({
       room: state.local.room,
-      wave_id: session.waveId,
-      target_id: target?.id || "",
+      waveId: session.waveId,
+      targetId: target?.id || "",
       score: session.score,
-      ts: Date.now(),
     }),
   );
 }
@@ -1372,95 +1381,41 @@ function updateMouseSource(event) {
 function connectRelay() {
   const relayUrl = normalizeRelayUrl(elements.relayInput.value);
   elements.relayInput.value = relayUrl;
+  localStorage.setItem("gazeGame.relay", relayUrl);
 
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(relayUrl);
-    state.ws = ws;
-    let settled = false;
-    const timeout = window.setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        ws.close();
-        reject(new Error("Relay connection timed out."));
+  return connectRelaySocket({
+    url: relayUrl,
+    room: state.local.room,
+    name: state.local.name,
+    color: state.local.color,
+    onWelcome(message) {
+      state.local.id = message.id;
+      state.connected = true;
+      state.pendingWave = normalizeRelayWave(message.wave);
+      state.peers.clear();
+      for (const peer of message.peers || []) {
+        state.peers.set(peer.id, {
+          id: peer.id,
+          name: peer.name || "Guest",
+          color: peer.color || [255, 255, 255],
+          x: null,
+          y: null,
+          tracking: false,
+          lastSeen: 0,
+        });
       }
-    }, 8000);
-
-    ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({
-          type: "join",
-          room: state.local.room,
-          name: state.local.name,
-          color: state.local.color,
-        }),
-      );
-    });
-
-    ws.addEventListener("message", (event) => {
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-
-      if (message.type === "error" && !settled) {
-        settled = true;
-        window.clearTimeout(timeout);
-        ws.close();
-        reject(new Error(`Relay rejected join: ${message.message || "unknown_error"}`));
-        return;
-      }
-
-      if (message.type === "welcome") {
-        state.local.id = message.id;
-        state.connected = true;
-        state.pendingWave = normalizeRelayWave(message.wave);
-        state.peers.clear();
-        for (const peer of message.peers || []) {
-          state.peers.set(peer.id, {
-            id: peer.id,
-            name: peer.name || "Guest",
-            color: peer.color || [255, 255, 255],
-            x: null,
-            y: null,
-            tracking: false,
-            lastSeen: 0,
-          });
-        }
-        setTrackingStatus(state.source === "mouse" ? "Mouse" : "Gaze");
-        if (!settled) {
-          settled = true;
-          window.clearTimeout(timeout);
-          resolve();
-        }
-        return;
-      }
-
-      handleRelayMessage(message);
-    });
-
-    ws.addEventListener("error", () => {
-      if (!settled) {
-        settled = true;
-        window.clearTimeout(timeout);
-        reject(new Error(`Could not connect to ${relayUrl}`));
-      }
-    });
-
-    ws.addEventListener("close", () => {
-      if (!settled) {
-        settled = true;
-        window.clearTimeout(timeout);
-        reject(new Error("Relay closed before joining."));
-        return;
-      }
+      setTrackingStatus(state.source === "mouse" ? "Mouse" : "Gaze");
+    },
+    onMessage: handleRelayMessage,
+    onDisconnect() {
       if (state.running) {
         state.connected = false;
         setTrackingStatus("Disconnected");
         showToast("Relay disconnected");
       }
-    });
+    },
+  }).then((ws) => {
+    state.ws = ws;
   });
 }
 
@@ -1571,11 +1526,11 @@ function handleWaveScore(message) {
 
 function startSending() {
   window.clearInterval(state.sendTimer);
-  state.sendTimer = window.setInterval(sendCursor, 33);
+  state.sendTimer = window.setInterval(sendCursor, RELAY_SEND_INTERVAL_MS);
 }
 
 function sendCursor() {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.connected) {
+  if (!state.connected || !relayIsOpen(state.ws)) {
     return;
   }
   const calibrationActive = Boolean(state.calibrationSession?.active);
@@ -1583,15 +1538,14 @@ function sendCursor() {
     state.trainerSession?.active && !isMultiplayerWaveMode(state.trainerSession.mode),
   );
   state.seq += 1;
-  state.ws.send(
-    JSON.stringify({
-      type: "cursor",
+  sendRelayMessage(
+    state.ws,
+    buildCursorMessage({
       room: state.local.room,
       x: state.local.tracking && !calibrationActive && !trainerHidden ? state.local.x : null,
       y: state.local.tracking && !calibrationActive && !trainerHidden ? state.local.y : null,
       tracking: state.local.tracking && !calibrationActive && !trainerHidden,
       seq: state.seq,
-      ts: Date.now(),
     }),
   );
 }
@@ -2364,30 +2318,6 @@ function averagePoint(samples) {
     sumY += y;
   }
   return [sumX / Math.max(samples.length, 1), sumY / Math.max(samples.length, 1)];
-}
-
-function defaultRelayUrl() {
-  if (location.protocol === "https:") {
-    return `wss://${location.host}/ws`;
-  }
-  if (location.protocol === "http:") {
-    return `ws://${location.host}/ws`;
-  }
-  return "ws://127.0.0.1:8765/ws";
-}
-
-function normalizeRelayUrl(value) {
-  const raw = (value || defaultRelayUrl()).trim();
-  if (raw.startsWith("https://")) {
-    return `wss://${raw.slice("https://".length)}`;
-  }
-  if (raw.startsWith("http://")) {
-    return `ws://${raw.slice("http://".length)}`;
-  }
-  if (raw.startsWith("ws://") || raw.startsWith("wss://")) {
-    return raw;
-  }
-  return `ws://${raw}`;
 }
 
 function normalizeRoom(value) {

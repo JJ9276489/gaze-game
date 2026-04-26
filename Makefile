@@ -9,6 +9,7 @@ check-js:
 	node --check web/personal_model.js
 	node --check web/game_logic.js
 	node --check web/calibration_logic.js
+	node --check web/relay_client.js
 
 check-python:
 	$(PYTHON) -m py_compile relay_server.py shared_gaze/*.py scripts/*.py
