@@ -4,10 +4,14 @@ import {
   buildPersonalFeatureVector,
   createTrainingSample,
   distancePx,
+  clearPersonalStatsForKind,
   loadPersonalModels,
+  loadPersonalStats,
   loadTrainingSamples,
   mean,
+  personalStatsForKind,
   predictWithPersonalModel,
+  recordTrainingSamples,
   samplesForKind,
   savePersonalModels,
   saveTrainingSamples,
@@ -210,6 +214,7 @@ const elements = {
 };
 
 const ctx = elements.canvas.getContext("2d");
+const initialTrainingSamples = loadTrainingSamples();
 
 const state = {
   animationFrame: 0,
@@ -240,8 +245,9 @@ const state = {
   peers: new Map(),
   calibration: loadCalibration(),
   calibrationSession: null,
-  trainingSamples: loadTrainingSamples(),
+  trainingSamples: initialTrainingSamples,
   personalModels: loadPersonalModels(),
+  personalStats: loadPersonalStats(initialTrainingSamples),
   trainerSession: null,
   waveScores: new Map(),
   pendingWave: null,
@@ -1249,13 +1255,20 @@ function finishTrainerRun(session) {
 async function finishTrainingRun(session) {
   const trainingUpdate = appendTrainingSamples(state.trainingSamples, session.capturedSamples);
   state.trainingSamples = saveTrainingSamples(trainingUpdate.samples);
-  refreshPersonalModelLabel();
+  const samples = samplesForKind(state.trainingSamples, session.kind);
+  state.personalStats = recordTrainingSamples(
+    state.personalStats,
+    session.kind,
+    trainingUpdate.addedCount,
+    samples.length,
+  );
   if (trainingUpdate.addedCount < 1) {
+    refreshPersonalModelLabel();
     showToast("No usable samples collected.");
     return;
   }
 
-  const samples = samplesForKind(state.trainingSamples, session.kind);
+  refreshPersonalModelLabel();
   if (samples.length < PERSONAL_MIN_SAMPLES) {
     showToast(`Saved ${samples.length} samples. Need ${PERSONAL_MIN_SAMPLES} to train.`);
     return;
@@ -1265,11 +1278,14 @@ async function finishTrainingRun(session) {
   await nextFrame();
   try {
     const model = trainPersonalModel(session.kind, samples);
+    const stats = personalStatsForKind(state.personalStats, session.kind, state.trainingSamples);
+    model.totalSampleCount = stats.totalSamples;
+    model.retainedSampleCount = samples.length;
     state.personalModels[session.kind] = model;
     savePersonalModels(state.personalModels);
     refreshPersonalModelLabel();
     showToast(
-      `Dojo complete: ${samples.length} samples, ${Math.round(model.fitMeanPx)} px fit.`,
+      `Dojo complete: ${stats.totalSamples} total samples, ${Math.round(model.fitMeanPx)} px fit.`,
     );
     window.setTimeout(hideToast, 2200);
   } catch (error) {
@@ -1332,6 +1348,11 @@ function resetCurrentPersonalModel() {
   state.trainingSamples = state.trainingSamples.filter((sample) => sample.kind !== kind);
   savePersonalModels(state.personalModels);
   state.trainingSamples = saveTrainingSamples(state.trainingSamples);
+  state.personalStats = clearPersonalStatsForKind(
+    state.personalStats,
+    kind,
+    samplesForKind(state.trainingSamples, kind).length,
+  );
   refreshPersonalModelLabel();
   showToast(
     hadModel || before !== state.trainingSamples.length ? "Personal NN reset." : "No personal NN data.",
@@ -2624,6 +2645,13 @@ function hslToRgb(h, s, l) {
 function refreshPersonalModelLabel() {
   const kind = state.modelKey;
   const sampleCount = samplesForKind(state.trainingSamples, kind).length;
+  const stats = personalStatsForKind(state.personalStats, kind, state.trainingSamples);
+  const totalSamples = Math.max(
+    stats.totalSamples,
+    Number(state.personalModels[kind]?.totalSampleCount) || 0,
+    Number(state.personalModels[kind]?.sampleCount) || 0,
+    sampleCount,
+  );
   const model = state.personalModels[kind];
   const hasPersonalData = Boolean(model) || sampleCount > 0;
   elements.challengeButton.disabled = !model;
@@ -2633,15 +2661,18 @@ function refreshPersonalModelLabel() {
   elements.personalProgressFill.style.width = `${Math.round(progress * 100)}%`;
   if (model) {
     const fit = Number.isFinite(model.fitMeanPx) ? `fit ${Math.round(model.fitMeanPx)} px` : "trained";
-    elements.personalModelLabel.textContent = `${model.sampleCount || sampleCount} samples · ${fit}`;
-    elements.personalModelMeta.textContent = isLocalDojoSession()
-      ? "Train again to refine fit"
-      : "Ready for room play";
+    elements.personalModelLabel.textContent = `${totalSamples} samples · ${fit}`;
+    elements.personalModelMeta.textContent =
+      totalSamples > sampleCount
+        ? `${sampleCount} retained for training`
+        : isLocalDojoSession()
+          ? "Train again to refine fit"
+          : "Ready for room play";
     elements.personalProgressFill.style.width = "100%";
     return;
   }
   if (sampleCount > 0) {
-    elements.personalModelLabel.textContent = `${sampleCount}/${PERSONAL_MIN_SAMPLES} samples`;
+    elements.personalModelLabel.textContent = `${totalSamples}/${PERSONAL_MIN_SAMPLES} samples`;
     elements.personalModelMeta.textContent = "Keep training";
     return;
   }

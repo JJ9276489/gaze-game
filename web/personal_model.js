@@ -2,13 +2,15 @@ export const PERSONAL_MIN_SAMPLES = 60;
 
 const PERSONAL_DATA_VERSION = 1;
 const PERSONAL_MODEL_VERSION = 1;
+const PERSONAL_STATS_VERSION = 1;
 const PERSONAL_HIDDEN_UNITS = 18;
 const PERSONAL_TRAINING_EPOCHS = 180;
 const PERSONAL_TRAINING_RATE = 0.012;
-const PERSONAL_MAX_SAMPLES_PER_MODEL = 2600;
+const PERSONAL_MAX_SAMPLES_PER_MODEL = 6000;
 const PERSONAL_MAX_TRAINING_SAMPLES = 900;
 const PERSONAL_STORAGE_DATASET_KEY = "gazeGame.trainingSamples";
 const PERSONAL_STORAGE_MODELS_KEY = "gazeGame.personalModels";
+const PERSONAL_STORAGE_STATS_KEY = "gazeGame.personalStats";
 
 export const PERSONAL_FEATURE_KEYS = [
   "raw_x",
@@ -287,6 +289,83 @@ export function savePersonalModels(models) {
   );
 }
 
+export function loadPersonalStats(samples = []) {
+  const stats = { version: PERSONAL_STATS_VERSION, byKind: {} };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PERSONAL_STORAGE_STATS_KEY) || "{}");
+    const byKind = saved.byKind && typeof saved.byKind === "object" ? saved.byKind : {};
+    for (const [kind, entry] of Object.entries(byKind)) {
+      if (typeof kind !== "string" || !entry || typeof entry !== "object") {
+        continue;
+      }
+      stats.byKind[kind] = {
+        totalSamples: Math.max(0, Math.round(Number(entry.totalSamples) || 0)),
+        retainedSamples: Math.max(0, Math.round(Number(entry.retainedSamples) || 0)),
+        updatedAt: Math.max(0, Math.round(Number(entry.updatedAt) || 0)),
+      };
+    }
+  } catch {
+    // Ignore old or malformed stats; retained samples below provide a migration floor.
+  }
+
+  const retainedByKind = countSamplesByKind(samples);
+  for (const [kind, retainedSamples] of Object.entries(retainedByKind)) {
+    const entry = stats.byKind[kind] || { totalSamples: 0, retainedSamples: 0, updatedAt: 0 };
+    stats.byKind[kind] = {
+      totalSamples: Math.max(entry.totalSamples, retainedSamples),
+      retainedSamples,
+      updatedAt: entry.updatedAt,
+    };
+  }
+  return stats;
+}
+
+export function savePersonalStats(stats) {
+  const normalized = loadPersonalStatsFromObject(stats);
+  localStorage.setItem(PERSONAL_STORAGE_STATS_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+export function recordTrainingSamples(stats, kind, addedCount, retainedSamples) {
+  const next = loadPersonalStatsFromObject(stats);
+  const entry = next.byKind[kind] || { totalSamples: 0, retainedSamples: 0, updatedAt: 0 };
+  const cleanAdded = Math.max(0, Math.round(Number(addedCount) || 0));
+  const cleanRetained = Math.max(0, Math.round(Number(retainedSamples) || 0));
+  next.byKind[kind] = {
+    totalSamples: Math.max(entry.totalSamples + cleanAdded, cleanRetained),
+    retainedSamples: cleanRetained,
+    updatedAt: Date.now(),
+  };
+  return savePersonalStats(next);
+}
+
+export function clearPersonalStatsForKind(stats, kind, retainedSamples = 0) {
+  const next = loadPersonalStatsFromObject(stats);
+  const cleanRetained = Math.max(0, Math.round(Number(retainedSamples) || 0));
+  if (cleanRetained > 0) {
+    const entry = next.byKind[kind] || { totalSamples: 0, retainedSamples: 0, updatedAt: 0 };
+    next.byKind[kind] = {
+      totalSamples: Math.max(entry.totalSamples, cleanRetained),
+      retainedSamples: cleanRetained,
+      updatedAt: Date.now(),
+    };
+  } else {
+    delete next.byKind[kind];
+  }
+  return savePersonalStats(next);
+}
+
+export function personalStatsForKind(stats, kind, samples = []) {
+  const normalized = loadPersonalStatsFromObject(stats);
+  const retainedSamples = samplesForKind(samples, kind).length;
+  const entry = normalized.byKind[kind] || {};
+  return {
+    totalSamples: Math.max(Math.round(Number(entry.totalSamples) || 0), retainedSamples),
+    retainedSamples: Math.max(Math.round(Number(entry.retainedSamples) || 0), retainedSamples),
+    updatedAt: Math.max(0, Math.round(Number(entry.updatedAt) || 0)),
+  };
+}
+
 export function appendTrainingSamples(existingSamples, newSamples) {
   const usable = newSamples.filter(isUsableTrainingSample);
   return {
@@ -456,6 +535,33 @@ function capTrainingSamples(samples) {
   }
   capped.sort((a, b) => (a.ts || 0) - (b.ts || 0));
   return capped;
+}
+
+function countSamplesByKind(samples) {
+  const counts = {};
+  for (const sample of samples) {
+    if (!isUsableTrainingSample(sample)) {
+      continue;
+    }
+    counts[sample.kind] = (counts[sample.kind] || 0) + 1;
+  }
+  return counts;
+}
+
+function loadPersonalStatsFromObject(value) {
+  const stats = { version: PERSONAL_STATS_VERSION, byKind: {} };
+  const byKind = value?.byKind && typeof value.byKind === "object" ? value.byKind : {};
+  for (const [kind, entry] of Object.entries(byKind)) {
+    if (typeof kind !== "string" || !entry || typeof entry !== "object") {
+      continue;
+    }
+    stats.byKind[kind] = {
+      totalSamples: Math.max(0, Math.round(Number(entry.totalSamples) || 0)),
+      retainedSamples: Math.max(0, Math.round(Number(entry.retainedSamples) || 0)),
+      updatedAt: Math.max(0, Math.round(Number(entry.updatedAt) || 0)),
+    };
+  }
+  return stats;
 }
 
 function isUsableTrainingSample(sample) {
