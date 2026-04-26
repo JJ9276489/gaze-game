@@ -10,6 +10,7 @@ check-js:
 	node --check web/game_logic.js
 	node --check web/calibration_logic.js
 	node --check web/relay_client.js
+	node --check web/gaze_runtime.js
 	node --check web/renderer.js
 	node --check web/trainer_session.js
 
