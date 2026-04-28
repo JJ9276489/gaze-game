@@ -1,223 +1,151 @@
-# Gaze Game
+# Gaze Ninja
 
-Shared gaze-cursor rooms in the browser.
+Browser-based shared gaze rooms, built as a ninja target game.
 
-Each client runs gaze inference locally and sends only normalized cursor coordinates to a
-small WebSocket relay. The relay broadcasts cursor positions to everyone in the same
-room. Webcam frames, eye crops, face landmarks, and model tensors stay on the local
-machine.
+Each client estimates gaze locally, renders a cursor on a shared grid, and sends only
+normalized cursor state to a small WebSocket relay. Webcam frames, eye crops, landmarks,
+and model tensors stay on the user's device.
 
-The product direction is one client path: a hosted browser app. Each participant opens an
-HTTPS URL, allows camera access, joins a room, runs a short fullscreen calibration, and
-starts sharing a cursor. The relay stays a small websocket/static host and never receives
-camera frames or landmarks.
+The current product path is a hosted HTTPS browser app. The room is a hangout by default,
+and players opt into game runs when they are ready:
 
-See [docs/product-target.md](docs/product-target.md) for the intended install/connect
-flow.
+1. Open the shared URL.
+2. Enter a name.
+3. Enter the Dojo to calibrate and train a local personal NN adapter, or create/join a
+   room.
+4. Allow camera access.
+5. Calibrate in fullscreen.
+6. Train in the Dojo, then play Solo or start a Multiplayer wave from a room.
 
-## Relay Configuration
+## Project Shape
 
-The browser client discovers the relay through the same origin it was served from, so no
-per-user configuration is needed once testers have the HTTPS URL.
+- `web/` is the browser client and Gaze Ninja game surface.
+- `shared_gaze/relay_server.py` serves `web/` and relays cursor messages.
+- `scripts/export_browser_onnx.py` exports the local PyTorch gaze checkpoint for browser
+  inference.
+- `scripts/verify_browser_onnx.py` checks ONNX output against the PyTorch model.
+- `scripts/vendor_browser_runtime.py` pins MediaPipe and ONNX Runtime Web assets under
+  `web/vendor/` so the deployed app is not loading runtime code from public CDNs.
 
-Do not expose the included unauthenticated relay directly to the public internet. For
-public testing, put it behind TLS and add authentication, rate limits, room limits, and
-basic abuse controls first.
+## Privacy Boundary
 
-The legacy Python client is configurable at runtime. By default it tries a local relay at
-`ws://127.0.0.1:8765`. Override with flags or env:
+The relay receives only cursor-level state (room code, name, normalized coordinates,
+tracking, timestamps, server-generated wave targets, and validated score events). Webcam
+frames, eye crops, face landmarks, MediaPipe outputs, model tensors, checkpoints, and
+personal training samples stay on the user's device. See
+[docs/product-target.md#data-sent-over-the-network](docs/product-target.md#data-sent-over-the-network)
+for the authoritative list.
 
-```bash
-python gaze_game.py --server ws://127.0.0.1:8765 --room K7M-4QX
-GAZE_GAME_RELAY_URLS="wss://relay.example.com,ws://127.0.0.1:8765" python gaze_game.py
-```
+## Setup
 
-Packaged legacy alpha builds can also be configured without Terminal. The build script
-can put a `relay_urls.txt` file in the same unzipped folder as `Gaze Game.app`:
-
-```text
-Gaze-Game-alpha-macos-arm64/
-  Gaze Game.app
-  relay_urls.txt
-  README-FIRST.txt
-```
-
-Use one relay URL per line, or comma-separated URLs. Lines can include comments after
-`#`. See [relay_urls.example.txt](relay_urls.example.txt).
-
-## Model Assets
-
-The browser client loads `web/models/vision_gaze_spatial_geom.onnx`. See the
-[Browser App](#browser-app) section below for how to export it.
-
-The legacy Python/macOS path expects local PyTorch assets:
-
-```text
-models/vision_gaze_spatial_geom.pt
-models/face_landmarker.task
-```
-
-All model files are intentionally ignored by git. The macOS build script can stage the
-PyTorch assets from a sibling `eye-cursor` checkout if available:
-
-```text
-../eye-cursor/models/
-```
-
-That keeps `eye-cursor` as the research/training project while this project stays focused
-on multiplayer rendering and networking.
-
-## Developer Setup
+Python 3.11 for the local tooling. Pick the requirements file that matches the role:
 
 ```bash
 git clone git@github.com:JJ9276489/gaze-game.git
 cd gaze-game
-python3.11 -m venv .venv
-source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-relay.txt  # relay-only host
+python -m pip install -r requirements-dev.txt    # also gets ONNX export/verify
 ```
 
-Use Python 3.11. Newer Python versions may not work with the pinned native dependencies.
+## Browser Runtime And Model Assets
 
-## Browser App
-
-The browser client lives in `web/` and is served by `relay_server.py` by default. It is
-the primary product path and supports:
-
-- room creation and joining
-- same-origin websocket relay discovery
-- browser camera permission prompts
-- in-browser MediaPipe Face Landmarker preprocessing
-- in-browser ONNX Runtime Web inference with the exported gaze checkpoint
-- five-point fullscreen calibration stored in the browser
-- mouse mode fallback for devices without usable gaze
-
-Export the local PyTorch checkpoint to the browser model path:
+Vendor the browser runtime assets before local or remote browser testing:
 
 ```bash
-source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
+python scripts/vendor_browser_runtime.py
+```
+
+This writes pinned MediaPipe, face landmarker, and ONNX Runtime Web files into
+`web/vendor/`. The browser serves those files from the relay origin. `web/vendor/` is
+generated and ignored by git.
+
+Model files are ignored by git; generate or copy them onto the relay machine before
+testing gaze inference. If no ONNX model loads, the browser falls back to a heuristic
+predictor so room networking still works.
+
+Browser (primary):
+
+```text
+web/models/vision_gaze_spatial_geom.onnx
+web/models/vision_gaze_latest.onnx
+```
+
+Export from the local PyTorch checkpoint:
+
+```bash
 python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-The exported model is written to `web/models/vision_gaze_spatial_geom.onnx` and is
-intentionally ignored by git, like the PyTorch checkpoint. Keep it on the private relay
-machine or inside private alpha deploy artifacts, not in the public repo.
+The browser-selectable model manifest is `config/browser_models.json`. Running the
+commands above exports and verifies every configured browser model by default.
 
-### Local Run
+Local PyTorch checkpoints used by export/verify:
+
+```text
+models/vision_gaze_spatial_geom.pt
+models/vision_gaze_latest.pt
+```
+
+## Local Run
 
 Start the relay and browser client:
 
 ```bash
+source .venv/bin/activate
 python relay_server.py --host 127.0.0.1 --port 8765
 ```
 
-Open `http://127.0.0.1:8765`, then:
+Open:
 
-1. Enter a name.
-2. Click `Create room`.
-3. Allow camera access.
-4. Click `Calibrate`.
-5. Keep the page fullscreen and stare at each target until it moves.
+```text
+http://127.0.0.1:8765
+```
 
-For a two-client test on one computer, open the page in a second tab, join the same
-room, and enable `Mouse mode` under `Connection`.
+For a two-client local test, open a second tab, join the same room, and enable `Mouse
+mode` under `Connection`.
 
-### Private Remote Run
+See [docs/alpha-tester-guide.md](docs/alpha-tester-guide.md) for in-session screen
+controls and the Dojo / Solo / Multiplayer game modes.
 
-Serve the same port through a private HTTPS URL, such as Tailscale Serve:
+## Checks
+
+Run the lightweight repo checks before pushing browser or relay changes:
 
 ```bash
+make check
+```
+
+This runs JavaScript syntax checks, Python syntax checks, Node unit tests for browser
+logic, and Python unit tests for relay state. ONNX export/verify remains a separate check
+for model changes.
+
+## Private Remote Run
+
+For early remote tests, keep the relay bound to localhost and expose it through private
+HTTPS, for example with Tailscale Serve:
+
+```bash
+cd ~/gaze-game-relay
+source .venv/bin/activate
 python -m pip install -r requirements-relay.txt
 python relay_server.py --host 127.0.0.1 --port 8765
 tailscale serve --bg 8765
 ```
 
-Send the generated `https://...ts.net` URL and a room code. Testers should join, allow
-camera, click `Calibrate`, and keep the page fullscreen during calibration. See
-[docs/browser-alpha.md](docs/browser-alpha.md) for more detail.
+Send testers the generated `https://...ts.net` URL and a room code. Browser camera access
+requires HTTPS for remote pages.
 
-## Legacy Mac App
+Do not expose the included relay to the public internet. It has high-entropy room codes,
+message limits, basic per-client rate limits, server-generated waves, and server-side
+score validation, but it is still a private-alpha relay without accounts, abuse controls,
+or production observability.
 
-The packaged macOS app remains useful as a local benchmark against the original PyTorch
-runtime, but it is no longer the primary user path. Build the app bundle:
+## Docs
 
-```bash
-./scripts/build_macos_app.sh
-```
-
-The PyInstaller spec includes `NSCameraUsageDescription`, which lets macOS show a normal
-Camera permission prompt for `Gaze Game.app`. The built app is written to:
-
-```text
-dist/Gaze Game.app
-```
-
-The build script stages local model assets from `../eye-cursor/models/` into the ignored
-`models/` directory before packaging. It also locally signs the app with the camera
-entitlement and writes an ignored alpha zip:
-
-```text
-dist/Gaze-Game-alpha-macos-arm64.zip
-```
-
-If an ignored `relay_urls.local.txt` file exists, the build script copies it into the zip
-as `relay_urls.txt` in the same folder as `Gaze Game.app`. This is the intended way to
-send a preconfigured private alpha build to non-technical testers. The user-facing
-instructions should simply say to unzip the folder and open the app from there.
-
-This local build is for Apple Silicon Macs and is not Developer ID notarized. Testers may
-need to right-click `Gaze Game.app` and choose Open the first time.
-
-## Remote Alpha Tester Flow
-
-Use this flow for private browser testing before there is a public relay.
-
-Relay setup:
-
-1. Host `relay_server.py` on a machine reachable by every tester.
-2. Expose it over private HTTPS such as Tailscale Serve.
-3. Keep the relay bound to `127.0.0.1` on the host and let the HTTPS layer front it.
-4. Keep relay logs open during first tests so joins and disconnects are visible.
-
-Tester setup:
-
-1. Tester opens the shared HTTPS URL.
-2. Tester enters a name.
-3. Tester creates or joins a room.
-4. Tester allows camera access.
-5. Tester clicks `Calibrate`.
-
-Room test:
-
-1. One person creates a room and sends the short code.
-2. The other person joins the same room.
-3. Both people finish calibration.
-4. Both people should see shared cursors on the dark grid.
-
-Troubleshooting:
-
-- `Could not connect to relay`: the host relay is down or the HTTPS front door is misconfigured.
-- `Camera access needs HTTPS or localhost`: use the shared HTTPS URL, not plain HTTP.
-- Bad gaze quality: recalibrate in fullscreen and keep your head still during the five targets.
-
-## Relay Operations
-
-See [docs/relay-operations.md](docs/relay-operations.md) for generic relay deployment
-notes.
-
-## Model Notes
-
-The architecture is shared, but the checkpoint is personal. Each participant should
-eventually collect and train their own `spatial_geom` checkpoint on their own MacBook,
-then re-export it to ONNX for the browser with `scripts/export_browser_onnx.py`. The
-legacy Python client can run a personal checkpoint directly:
-
-```bash
-python gaze_game.py --checkpoint /path/to/vision_gaze_spatial_geom.pt
-```
-
-Regardless of the path, the client sends only `x`, `y`, `tracking`, timestamp, name, and
-color over the wire.
+- [Product target](docs/product-target.md)
+- [Browser alpha operator notes](docs/browser-alpha.md)
+- [Alpha tester guide](docs/alpha-tester-guide.md)
+- [Relay operations](docs/relay-operations.md)

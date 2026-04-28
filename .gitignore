@@ -4,13 +4,12 @@ __pycache__/
 .DS_Store
 .env
 *.local
-relay_urls.local.txt
 docs/private-*.md
 build/
 dist/
-models/*.task
 models/*.pt
 models/*.json
 web/models/*.onnx
 web/models/*.pt
 web/models/*.json
+web/vendor/

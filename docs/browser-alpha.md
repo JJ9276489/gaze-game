@@ -1,27 +1,45 @@
 # Browser Alpha
 
-The browser app is the primary product path. Testers join from Chrome, Edge, Safari, or a
-Chromebook without installing a native app. It uses the webcam through the browser,
-estimates gaze locally, calibrates against the current viewport, and sends only cursor
-coordinates to the relay.
+The browser app is the primary product path. The current game skin is Gaze Ninja: the
+room is a hangout by default, the Dojo trains the personal model with dummies, and room
+play uses Solo or Multiplayer enemy waves as gaze targets.
 
 ## What Works
 
-- MacBook browsers
+- laptop and desktop browsers with webcam access
 - Chromebook browsers
 - local two-client tests from one computer
-- remote private tests through Tailscale
+- remote private tests through Tailscale or another private HTTPS front door
 - ONNX-exported gaze checkpoint inference
 - five-point fullscreen calibration with saved local browser state
+- browser-local personal NN adapter training
+- live debug metrics and JSON log export for remote tester reports
+- timed Solo and Multiplayer target competition
+- hangout rooms with opt-in game waves
+- synchronized multiplayer enemy waves with room-visible scores
+- server-generated multiplayer targets with server-side score increments
+- pinned browser runtime assets served from the relay origin
 - heuristic fallback if the ONNX model asset is missing
 - mouse mode when camera gaze is unavailable
 
-## Model Asset
+## Runtime And Model Assets
+
+Vendor the browser runtime before local or remote testing:
+
+```bash
+source .venv/bin/activate
+python scripts/vendor_browser_runtime.py
+```
+
+This places pinned MediaPipe, face landmarker, and ONNX Runtime Web assets under
+`web/vendor/`. Testers' browsers load those runtime files from the relay origin, not from
+public CDNs. `web/vendor/` is generated and ignored by git.
 
 The browser client loads:
 
 ```text
 web/models/vision_gaze_spatial_geom.onnx
+web/models/vision_gaze_latest.onnx
 ```
 
 Generate it from the local PyTorch checkpoint before deploying the browser alpha:
@@ -33,8 +51,10 @@ python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-The ONNX file is ignored by git because it is derived from the local checkpoint. Put it on
-the private relay machine with the web client, but do not commit it to the public repo.
+The model list and checkpoint paths live in `config/browser_models.json`. ONNX files are
+ignored by git because they are derived from local checkpoints. Put the needed model files
+on the private relay machine with the web client, but do not commit them to the public
+repo.
 
 ## Local Test
 
@@ -56,13 +76,15 @@ For a two-client test on one computer:
 
 1. Open the page in one browser tab.
 2. Enter your name.
-3. Click Create room.
+3. Click `Dojo`.
 4. Click `Calibrate` and keep staring at each target until it moves.
-5. Open the page in a second tab or another browser.
-6. Enter a different name.
-7. Enter the same room code.
-8. Open Connection and enable Mouse mode.
-9. Click Join room.
+5. Complete a Dojo dummy run.
+6. Click `Leave`, then click `Create room`.
+7. Open the page in a second tab or another browser.
+8. Enter a different name.
+9. Enter the same room code.
+10. Open Connection and enable Mouse mode if you only need to validate networking.
+11. Click Join room.
 
 ## Private Remote Test With Tailscale
 
@@ -92,19 +114,38 @@ a Tailscale share for the relay machine.
 
 ## Tester Steps
 
-1. Install Tailscale if the organizer says the test uses Tailscale.
-2. Sign in or accept the relay-machine share.
-3. Open the HTTPS URL from the organizer.
-4. Enter a name.
-5. Click Create room, or enter a room code and click Join room.
-6. Allow camera access when the browser asks.
-7. Click `Calibrate`.
+See [alpha-tester-guide.md](alpha-tester-guide.md) for the tester-facing join and play
+steps.
+
+When a remote tester reports bad gaze quality, ask them to click `Debug`, then
+`Export log`, and send the downloaded JSON. The log contains runtime/model/cursor timing
+state and recent normalized gaze samples, not webcam frames or the actual room code.
+
+## Multi-User Behavior
+
+Rooms share cursor state only. Calibration and Dojo are per-user browser runs. One user
+starting `Dojo` does not start training for anyone else, and the app hides that user's
+cursor from peers during local training so stale target movement does not distract the
+room.
+
+`Solo` runs an enemy wave locally and hides it from peers. `Multiplayer` shares a wave
+across the room; see [relay-operations.md](relay-operations.md#local-development) for the
+relay-side `wave_start` / `wave_hit` / `wave_score` behavior.
+
+The current relay generates multiplayer targets, rate-limits noisy messages, and ignores
+client score totals. It validates each hit against the expected target order and the
+client's recent cursor position, then increments the score server-side. This is enough for
+private alpha testing, but it is still not a public anti-cheat or matchmaking server.
+
+## Screen Controls
+
+See [alpha-tester-guide.md](alpha-tester-guide.md#screen-controls).
 
 ## Chromebook Notes
 
-Chromebooks should use the browser alpha, not the macOS app. Use Chrome, keep Tailscale
-connected, and open the HTTPS URL. If camera gaze is unreliable, open Connection, enable
-Mouse mode, and join the same room to validate networking.
+Chromebooks should use Chrome, keep Tailscale connected, and open the HTTPS URL. If
+camera gaze is unreliable, open Connection, enable Mouse mode, and join the same room to
+validate networking.
 
 ## Troubleshooting
 

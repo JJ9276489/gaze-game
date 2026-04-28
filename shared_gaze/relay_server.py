@@ -1,6 +1,7 @@
 import argparse
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import math
 import mimetypes
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -19,6 +20,20 @@ from shared_gaze.protocol import clamp01, decode, encode, make_client_id, now_ms
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WEB_DIR = PROJECT_ROOT / "web"
+MAX_WAVE_TARGETS = 120
+WAVE_TARGET_COUNT = 96
+WAVE_HIT_RADIUS = 0.16
+WAVE_CURSOR_MAX_AGE_MS = 2_000
+DEFAULT_WAVE_DURATION_MS = 30_000
+MAX_WAVE_DURATION_MS = 120_000
+MAX_CLIENTS_PER_ROOM = 8
+MAX_MESSAGE_BYTES = 16 * 1024
+RATE_LIMITS = {
+    "join": (6, 10_000),
+    "cursor": (150, 3_000),
+    "wave_start": (3, 10_000),
+    "wave_hit": (30, 3_000),
+}
 
 
 @dataclass
@@ -28,17 +43,25 @@ class RelayClient:
     room: str | None = None
     name: str = "anonymous"
     color: tuple[int, int, int] = (0, 255, 255)
+    last_cursor: tuple[float, float] | None = None
+    last_cursor_at: int = 0
+    rate_limits: dict[str, list[int]] = field(default_factory=dict)
 
 
 class RelayState:
     def __init__(self) -> None:
         self.clients: dict[str, RelayClient] = {}
         self.rooms: dict[str, dict[str, RelayClient]] = {}
+        self.waves: dict[str, dict[str, Any]] = {}
 
     def join_room(self, client: RelayClient, room: str) -> None:
         self.leave_room(client)
         client.room = room
         self.rooms.setdefault(room, {})[client.id] = client
+
+    def can_join_room(self, client: RelayClient, room: str) -> bool:
+        room_clients = self.rooms.get(room, {})
+        return client.id in room_clients or len(room_clients) < MAX_CLIENTS_PER_ROOM
 
     def leave_room(self, client: RelayClient) -> None:
         if client.room is None:
@@ -48,7 +71,91 @@ class RelayState:
             room_clients.pop(client.id, None)
             if not room_clients:
                 self.rooms.pop(client.room, None)
+                self.waves.pop(client.room, None)
         client.room = None
+
+    def active_wave_for(self, room: str) -> dict[str, Any] | None:
+        wave = self.waves.get(room)
+        if not wave:
+            return None
+        if now_ms() >= int(wave.get("ends_at") or 0):
+            self.waves.pop(room, None)
+            return None
+        return public_wave(wave)
+
+    def start_wave(self, room: str, client: RelayClient, message: dict[str, Any]) -> dict[str, Any]:
+        active = self.active_wave_for(room)
+        if active is not None:
+            return active
+
+        started_at = now_ms()
+        duration_ms = clean_duration_ms(message.get("duration_ms"))
+        seed = clean_wave_seed(message.get("seed"))
+        wave = {
+            "id": make_client_id(),
+            "mode": "multiplayer",
+            "seed": seed,
+            "targets": make_wave_targets(seed),
+            "started_at": started_at,
+            "duration_ms": duration_ms,
+            "ends_at": started_at + duration_ms,
+            "started_by": client.id,
+            "started_by_name": client.name,
+            "scores": {},
+            "progress": {},
+        }
+        self.waves[room] = wave
+        return public_wave(wave)
+
+    def update_wave_score(
+        self,
+        room: str,
+        client: RelayClient,
+        wave_id: Any,
+        target_id: Any,
+    ) -> dict[str, Any] | None:
+        wave = self.waves.get(room)
+        if not wave or wave.get("id") != str(wave_id or ""):
+            return None
+        if now_ms() >= int(wave.get("ends_at") or 0):
+            self.waves.pop(room, None)
+            return None
+
+        targets = wave.get("targets") or []
+        if not targets:
+            return None
+
+        progress = wave.setdefault("progress", {})
+        player_progress = progress.setdefault(client.id, {"score": 0, "next_index": 0})
+        next_index = int(player_progress.get("next_index") or 0)
+        expected_target = targets[next_index % len(targets)]
+        clean_target_id = str(target_id or "")[:64]
+        if clean_target_id != expected_target.get("id"):
+            return None
+        if not cursor_is_recently_on_target(client, expected_target):
+            return None
+
+        clean_score = int(player_progress.get("score") or 0) + 1
+        player_progress["score"] = clean_score
+        player_progress["next_index"] = next_index + 1
+        clean_score = max(0, min(9999, clean_score))
+        scores = wave.setdefault("scores", {})
+        scores[client.id] = {
+            "id": client.id,
+            "name": client.name,
+            "color": list(client.color),
+            "score": clean_score,
+        }
+        return {
+            "type": "wave_score",
+            "wave_id": wave["id"],
+            "id": client.id,
+            "name": client.name,
+            "color": list(client.color),
+            "score": clean_score,
+            "target_id": clean_target_id,
+            "server_ts": now_ms(),
+        }
 
     def peers_for(self, client: RelayClient) -> list[dict[str, Any]]:
         if client.room is None:
@@ -105,6 +212,116 @@ def clean_name(value: Any) -> str:
     return name[:32] or "anonymous"
 
 
+def clean_wave_seed(value: Any) -> str:
+    seed = str(value or make_client_id()).strip()
+    return seed[:64] or make_client_id()
+
+
+def clean_duration_ms(value: Any) -> int:
+    try:
+        duration = int(value)
+    except Exception:
+        duration = DEFAULT_WAVE_DURATION_MS
+    return max(5_000, min(MAX_WAVE_DURATION_MS, duration))
+
+
+def clean_wave_targets(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    targets: list[dict[str, Any]] = []
+    for index, item in enumerate(value[:MAX_WAVE_TARGETS]):
+        if not isinstance(item, dict):
+            continue
+        targets.append(
+            {
+                "id": str(item.get("id") or f"enemy-{index}")[:64],
+                "x": clamp01(item.get("x")),
+                "y": clamp01(item.get("y")),
+            }
+        )
+    return targets
+
+
+def hash_wave_seed(seed: str) -> int:
+    hash_value = 2166136261
+    for char in str(seed):
+        hash_value = ((hash_value ^ ord(char)) * 16777619) & 0xFFFFFFFF
+    return hash_value
+
+
+def seeded_random(seed: str):
+    value = hash_wave_seed(seed)
+    while True:
+        value = (value + 0x6D2B79F5) & 0xFFFFFFFF
+        next_value = value
+        next_value = ((next_value ^ (next_value >> 15)) * (next_value | 1)) & 0xFFFFFFFF
+        next_value ^= (
+            next_value
+            + (((next_value ^ (next_value >> 7)) * (next_value | 61)) & 0xFFFFFFFF)
+        ) & 0xFFFFFFFF
+        next_value &= 0xFFFFFFFF
+        yield ((next_value ^ (next_value >> 14)) & 0xFFFFFFFF) / 4294967296
+
+
+def make_wave_targets(seed: str, count: int = WAVE_TARGET_COUNT) -> list[dict[str, Any]]:
+    random_values = seeded_random(seed)
+    targets: list[dict[str, Any]] = []
+    previous: dict[str, Any] | None = None
+    for index in range(min(count, MAX_WAVE_TARGETS)):
+        target: dict[str, Any] | None = None
+        for _attempt in range(10):
+            target = {
+                "id": f"enemy-{index}",
+                "x": 0.12 + next(random_values) * 0.76,
+                "y": 0.14 + next(random_values) * 0.62,
+            }
+            if not previous or math.hypot(target["x"] - previous["x"], target["y"] - previous["y"]) > 0.25:
+                break
+        if target is None:
+            continue
+        targets.append(target)
+        previous = target
+    return targets
+
+
+def cursor_is_recently_on_target(client: RelayClient, target: dict[str, Any]) -> bool:
+    if client.last_cursor is None:
+        return False
+    if now_ms() - client.last_cursor_at > WAVE_CURSOR_MAX_AGE_MS:
+        return False
+    return math.hypot(client.last_cursor[0] - float(target["x"]), client.last_cursor[1] - float(target["y"])) <= WAVE_HIT_RADIUS
+
+
+def is_rate_limited(client: RelayClient, message_type: Any, timestamp_ms: int | None = None) -> bool:
+    limit = RATE_LIMITS.get(str(message_type or ""))
+    if limit is None:
+        return False
+    max_messages, window_ms = limit
+    now = timestamp_ms if timestamp_ms is not None else now_ms()
+    bucket = client.rate_limits.setdefault(str(message_type), [])
+    cutoff = now - window_ms
+    while bucket and bucket[0] <= cutoff:
+        del bucket[0]
+    if len(bucket) >= max_messages:
+        return True
+    bucket.append(now)
+    return False
+
+
+def public_wave(wave: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": wave["id"],
+        "mode": wave.get("mode", "multiplayer"),
+        "seed": wave.get("seed", ""),
+        "targets": wave.get("targets", []),
+        "started_at": int(wave.get("started_at") or 0),
+        "duration_ms": int(wave.get("duration_ms") or DEFAULT_WAVE_DURATION_MS),
+        "started_by": wave.get("started_by"),
+        "started_by_name": wave.get("started_by_name", "Guest"),
+        "scores": list((wave.get("scores") or {}).values()),
+    }
+
+
 async def handle_client(websocket, state: RelayState) -> None:
     client = RelayClient(id=make_client_id(), websocket=websocket)
     state.clients[client.id] = client
@@ -117,8 +334,16 @@ async def handle_client(websocket, state: RelayState) -> None:
                 continue
 
             message_type = message.get("type")
+            if is_rate_limited(client, message_type):
+                if message_type != "cursor":
+                    await websocket.send(encode({"type": "error", "message": "rate_limited"}))
+                continue
+
             if message_type == "join":
                 room = clean_room(message.get("room"))
+                if not state.can_join_room(client, room):
+                    await websocket.send(encode({"type": "error", "message": "room_full"}))
+                    continue
                 client.name = clean_name(message.get("name"))
                 client.color = parse_color(message.get("color"))
                 state.join_room(client, room)
@@ -129,6 +354,7 @@ async def handle_client(websocket, state: RelayState) -> None:
                             "id": client.id,
                             "room": room,
                             "peers": state.peers_for(client),
+                            "wave": state.active_wave_for(room),
                             "ts": now_ms(),
                         }
                     )
@@ -153,6 +379,10 @@ async def handle_client(websocket, state: RelayState) -> None:
                 tracking = bool(message.get("tracking"))
                 x = None if message.get("x") is None else clamp01(message.get("x"))
                 y = None if message.get("y") is None else clamp01(message.get("y"))
+                clean_tracking = tracking and x is not None and y is not None
+                if clean_tracking:
+                    client.last_cursor = (float(x), float(y))
+                    client.last_cursor_at = now_ms()
                 await state.broadcast(
                     client.room,
                     {
@@ -162,13 +392,40 @@ async def handle_client(websocket, state: RelayState) -> None:
                         "color": list(client.color),
                         "x": x,
                         "y": y,
-                        "tracking": tracking and x is not None and y is not None,
+                        "tracking": clean_tracking,
                         "seq": int(message.get("seq") or 0),
                         "client_ts": message.get("ts"),
                         "server_ts": now_ms(),
                     },
                     exclude_id=client.id,
                 )
+                continue
+
+            if message_type == "wave_start":
+                if client.room is None:
+                    continue
+                wave = state.start_wave(client.room, client, message)
+                await state.broadcast(
+                    client.room,
+                    {
+                        "type": "wave_start",
+                        **wave,
+                        "server_ts": now_ms(),
+                    },
+                )
+                continue
+
+            if message_type == "wave_hit":
+                if client.room is None:
+                    continue
+                payload = state.update_wave_score(
+                    client.room,
+                    client,
+                    message.get("wave_id"),
+                    message.get("target_id"),
+                )
+                if payload is not None:
+                    await state.broadcast(client.room, payload)
                 continue
 
             await websocket.send(encode({"type": "error", "message": "unknown_type"}))
@@ -260,6 +517,7 @@ async def run_server(host: str, port: int, web_dir: Path | None = DEFAULT_WEB_DI
         host,
         port,
         process_request=process_request,
+        max_size=MAX_MESSAGE_BYTES,
     ):
         print(f"Gaze relay listening on ws://{host}:{port}")
         if process_request is not None:

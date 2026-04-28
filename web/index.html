@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Gaze Game</title>
+    <title>Gaze Ninja</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2305080d'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%2375d8ff' stroke-width='5'/%3E%3Cpath d='M19 36 32 12l13 24-13 16z' fill='%239cffd2'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
@@ -14,8 +15,8 @@
       <section id="lobby" class="panel" aria-labelledby="title">
         <div class="panel-header">
           <div>
-            <div class="brand-mark" aria-hidden="true">GG</div>
-            <h1 id="title">Gaze Game</h1>
+            <div class="brand-mark" aria-hidden="true">GN</div>
+            <h1 id="title">Gaze Ninja</h1>
           </div>
           <div id="secureBadge" class="badge">Camera ready</div>
         </div>
@@ -32,14 +33,9 @@
           </label>
 
           <div class="button-row">
-            <button id="createButton" type="button">Create room</button>
+            <button id="dojoButton" class="primary-action" type="button">Dojo</button>
             <button id="joinButton" type="submit">Join room</button>
-          </div>
-
-          <div class="flow-strip" aria-label="Game loop">
-            <span>Train</span>
-            <span>Test</span>
-            <span>Compete</span>
+            <button id="createButton" type="button">Create room</button>
           </div>
 
           <details class="advanced">
@@ -61,7 +57,7 @@
       <section id="hud" class="hud hidden" aria-live="polite">
         <div class="hud-cluster">
           <div class="room-block">
-            <span class="hud-label">Room</span>
+            <span id="roomScopeLabel" class="hud-label">Room</span>
             <div class="room-code-row">
               <strong id="roomLabel"></strong>
               <button id="copyRoomButton" type="button">Copy</button>
@@ -104,16 +100,21 @@
               aria-expanded="true"
               aria-pressed="false"
             >Hide buttons</button>
+            <button id="debugButton" class="quiet-action" type="button" aria-controls="debugPanel" aria-expanded="false" aria-pressed="false">Debug</button>
+            <button id="exportDebugButton" class="quiet-action" type="button">Export log</button>
           </div>
           <div id="hudActionButtons" class="hud-actions">
-            <button id="trainButton" class="primary-action" type="button">Train NN</button>
-            <button id="evaluateButton" class="secondary-action" type="button">Test</button>
-            <button id="challengeButton" class="secondary-action" type="button">Compete</button>
+            <button id="trainButton" class="primary-action" type="button">Dojo</button>
+            <button id="challengeButton" class="secondary-action" type="button">Solo</button>
+            <button id="multiplayerButton" class="secondary-action" type="button">Multiplayer</button>
             <button id="calibrateButton" class="quiet-action" type="button">Calibrate</button>
             <button id="resetPersonalButton" type="button">Reset NN</button>
             <button id="leaveButton" class="quiet-action" type="button">Leave</button>
           </div>
         </div>
+        <section id="debugPanel" class="debug-panel hidden" aria-label="Debug metrics">
+          <dl id="debugMetrics" class="debug-grid"></dl>
+        </section>
       </section>
 
       <section id="calibrationOverlay" class="calibration hidden" aria-live="polite">
@@ -132,7 +133,7 @@
       <section id="trainerOverlay" class="trainer hidden" aria-live="polite">
         <div class="trainer-dock">
           <div class="trainer-copy">
-            <p id="trainerStep" class="calibration-step">Training</p>
+            <p id="trainerStep" class="calibration-step">Dojo</p>
             <h2 id="trainerTitle">Target run</h2>
             <p id="trainerBody" class="calibration-body">Collecting samples.</p>
           </div>

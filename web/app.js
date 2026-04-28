@@ -1,177 +1,84 @@
 import {
   PERSONAL_MIN_SAMPLES,
   appendTrainingSamples,
-  buildPersonalFeatureVector,
-  createTrainingSample,
-  distancePx,
+  clearPersonalStatsForKind,
   loadPersonalModels,
+  loadPersonalStats,
   loadTrainingSamples,
-  mean,
+  personalStatsForKind,
   predictWithPersonalModel,
+  recordTrainingSamples,
   samplesForKind,
   savePersonalModels,
   saveTrainingSamples,
   trainPersonalModel,
 } from "./personal_model.js";
+import {
+  CHALLENGE_DURATION_MS,
+  createWaveSeed,
+  isMultiplayerWaveMode,
+  isWaveMode,
+  normalizeRelayWave,
+} from "./game_logic.js";
+import {
+  CALIBRATION_TARGETS,
+  buildCalibrationMapping,
+  calibrationTargetLabel,
+  getCalibrationMapping,
+  hasAnyCalibrationMapping,
+  loadCalibration,
+  mapPointWithCalibration,
+  saveCalibration,
+} from "./calibration_logic.js";
+import {
+  RELAY_SEND_INTERVAL_MS,
+  buildCursorMessage,
+  buildWaveHitMessage,
+  buildWaveStartMessage,
+  connectRelaySocket,
+  defaultRelayUrl,
+  normalizeRelayUrl,
+  relayIsOpen,
+  sendRelayMessage,
+} from "./relay_client.js";
+import {
+  DEFAULT_GAZE_MODEL_KEY,
+  drawMirroredVideoFrame,
+  estimateGaze,
+  gazeModelLabel,
+  isModelReading,
+  loadFaceLandmarker,
+  loadGazeModel,
+  modelConfig,
+  normalizeModelKey,
+} from "./gaze_runtime.js";
+import { renderStage } from "./renderer.js";
+import {
+  CHALLENGE_DWELL_MS,
+  CHALLENGE_TARGET_RADIUS_PX,
+  TRAIN_CAPTURE_MS,
+  advanceTrainerSession,
+  createTrainerSession,
+  currentTrainerTarget,
+  trainerModeLabel,
+  trainerOverlayView,
+  trainerWaveScoreMap,
+} from "./trainer_session.js";
+import {
+  colorForName,
+  controlsHiddenView,
+  generateRoomCode,
+  hudContextView,
+  normalizePlayerName,
+  normalizeRoom,
+  personalModelView,
+} from "./ui_state.js";
 
-const TASKS_VERSION = "0.10.34";
-const TASKS_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}`;
-const WASM_URL = `${TASKS_URL}/wasm`;
-const FACE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const ORT_VERSION = "1.24.3";
-const ORT_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.wasm.min.mjs`;
-const ORT_WASM_PATH = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
-const USE_BROWSER_HEAD_POSE_FEATURES = true;
-
-const EYE_CROP_WIDTH = 96;
-const EYE_CROP_HEIGHT = 64;
-
-const RIGHT_IRIS_POINTS = [469, 470, 471, 472];
-const LEFT_IRIS_POINTS = [474, 475, 476, 477];
-const RIGHT_EYE_CORNER_POINTS = [33, 133];
-const RIGHT_EYE_UPPER_LID_POINTS = [159, 158, 160, 161];
-const RIGHT_EYE_LOWER_LID_POINTS = [145, 153, 144, 163];
-const LEFT_EYE_CORNER_POINTS = [263, 362];
-const LEFT_EYE_UPPER_LID_POINTS = [386, 385, 387, 388];
-const LEFT_EYE_LOWER_LID_POINTS = [374, 380, 373, 390];
-
-const HEAD_FEATURE_KEYS = [
-  "face_center_x",
-  "face_center_y",
-  "face_scale",
-  "head_yaw_deg",
-  "head_pitch_deg",
-  "head_roll_deg",
-  "head_tx",
-  "head_ty",
-  "head_tz",
-];
-
-const HEAD_FEATURE_DEFAULTS = Object.freeze({
-  face_center_x: 0.4944416582584381,
-  face_center_y: 0.5652406215667725,
-  face_scale: 0.35118332505226135,
-  head_yaw_deg: 1.3236565589904785,
-  head_pitch_deg: 7.618877410888672,
-  head_roll_deg: -3.0949666500091553,
-  head_tx: -0.2545686364173889,
-  head_ty: -1.5664522647857666,
-  head_tz: -32.763702392578125,
-});
-
-const BROWSER_HEAD_POSE_SIGNS = Object.freeze({
-  yaw: -1,
-  pitch: -1,
-  roll: -1,
-  tx: -1,
-  ty: -1,
-  tz: 1,
-});
-
-const EXTRA_FEATURE_KEYS = [
-  "left_x",
-  "left_y",
-  "left_orth_y",
-  "left_openness",
-  "left_upper_gap",
-  "left_lower_gap",
-  "right_x",
-  "right_y",
-  "right_orth_y",
-  "right_openness",
-  "right_upper_gap",
-  "right_lower_gap",
-  "avg_x",
-  "avg_y",
-];
-
-const EXTRA_FEATURE_DEFAULTS = Object.freeze({
-  left_x: 0.5043262839317322,
-  left_y: 0.27408820390701294,
-  left_orth_y: -0.06770181655883789,
-  left_openness: 0.3100126087665558,
-  left_upper_gap: 0.18136809766292572,
-  left_lower_gap: 0.2398015856742859,
-  right_x: 0.4890110492706299,
-  right_y: 0.29838672280311584,
-  right_orth_y: -0.05517496168613434,
-  right_openness: 0.2884048819541931,
-  right_upper_gap: 0.17870494723320007,
-  right_lower_gap: 0.2097252458333969,
-  avg_x: 0.4966680109500885,
-  avg_y: 0.28623655438423157,
-});
-
-const GAZE_MODELS = Object.freeze({
-  spatial_geom: {
-    key: "spatial_geom",
-    label: "Spatial geom",
-    url: "./models/vision_gaze_spatial_geom.onnx",
-    extraFeatureKeys: EXTRA_FEATURE_KEYS,
-  },
-  latest: {
-    key: "latest",
-    label: "Concat latest",
-    url: "./models/vision_gaze_latest.onnx",
-    extraFeatureKeys: [],
-  },
-});
-const DEFAULT_GAZE_MODEL_KEY = "spatial_geom";
-
-const CALIBRATION_VERSION = 3;
 const CALIBRATION_SETTLE_MS = 600;
 const CALIBRATION_CAPTURE_MS = 900;
 const CALIBRATION_MIN_SAMPLES = 10;
-const CALIBRATION_INSIDE_TOLERANCE = -0.04;
-const CALIBRATION_TARGETS = [
-  { id: "center", x: 0.5, y: 0.5 },
-  { id: "topLeft", x: 0.14, y: 0.16 },
-  { id: "topRight", x: 0.86, y: 0.16 },
-  { id: "bottomRight", x: 0.86, y: 0.84 },
-  { id: "bottomLeft", x: 0.14, y: 0.84 },
-];
-
-const TRAIN_TARGETS = [
-  { id: "train-01", x: 0.15, y: 0.16 },
-  { id: "train-02", x: 0.36, y: 0.16 },
-  { id: "train-03", x: 0.64, y: 0.16 },
-  { id: "train-04", x: 0.85, y: 0.16 },
-  { id: "train-05", x: 0.22, y: 0.34 },
-  { id: "train-06", x: 0.48, y: 0.34 },
-  { id: "train-07", x: 0.73, y: 0.34 },
-  { id: "train-08", x: 0.15, y: 0.52 },
-  { id: "train-09", x: 0.36, y: 0.52 },
-  { id: "train-10", x: 0.64, y: 0.52 },
-  { id: "train-11", x: 0.85, y: 0.52 },
-  { id: "train-12", x: 0.27, y: 0.68 },
-  { id: "train-13", x: 0.52, y: 0.68 },
-  { id: "train-14", x: 0.78, y: 0.68 },
-  { id: "train-15", x: 0.15, y: 0.78 },
-  { id: "train-16", x: 0.36, y: 0.78 },
-  { id: "train-17", x: 0.64, y: 0.78 },
-  { id: "train-18", x: 0.85, y: 0.78 },
-];
-const EVAL_TARGETS = [
-  { id: "eval-01", x: 0.24, y: 0.24 },
-  { id: "eval-02", x: 0.5, y: 0.22 },
-  { id: "eval-03", x: 0.76, y: 0.24 },
-  { id: "eval-04", x: 0.22, y: 0.5 },
-  { id: "eval-05", x: 0.51, y: 0.49 },
-  { id: "eval-06", x: 0.78, y: 0.5 },
-  { id: "eval-07", x: 0.24, y: 0.74 },
-  { id: "eval-08", x: 0.5, y: 0.76 },
-  { id: "eval-09", x: 0.76, y: 0.74 },
-];
-const TRAIN_SETTLE_MS = 360;
-const TRAIN_CAPTURE_MS = 640;
-const TRAIN_MIN_SAMPLES_PER_TARGET = 6;
-const EVAL_SETTLE_MS = 420;
-const EVAL_CAPTURE_MS = 700;
-const EVAL_MIN_SAMPLES_PER_TARGET = 6;
-const CHALLENGE_DURATION_MS = 30000;
-const CHALLENGE_TARGET_RADIUS_PX = 34;
-const CHALLENGE_DWELL_MS = 240;
+const DEBUG_REFRESH_MS = 250;
+const DEBUG_SAMPLE_LIMIT = 180;
 
 const $ = (id) => document.getElementById(id);
 
@@ -181,11 +88,12 @@ const elements = {
   lobby: $("lobby"),
   hud: $("hud"),
   form: $("joinForm"),
+  dojoButton: $("dojoButton"),
   createButton: $("createButton"),
   joinButton: $("joinButton"),
   trainButton: $("trainButton"),
-  evaluateButton: $("evaluateButton"),
   challengeButton: $("challengeButton"),
+  multiplayerButton: $("multiplayerButton"),
   calibrateButton: $("calibrateButton"),
   resetPersonalButton: $("resetPersonalButton"),
   leaveButton: $("leaveButton"),
@@ -196,10 +104,15 @@ const elements = {
   statusLine: $("statusLine"),
   toast: $("toast"),
   secureBadge: $("secureBadge"),
+  roomScopeLabel: $("roomScopeLabel"),
   roomLabel: $("roomLabel"),
   copyRoomButton: $("copyRoomButton"),
   fullscreenButton: $("fullscreenButton"),
   toggleControlsButton: $("toggleControlsButton"),
+  debugButton: $("debugButton"),
+  exportDebugButton: $("exportDebugButton"),
+  debugPanel: $("debugPanel"),
+  debugMetrics: $("debugMetrics"),
   nameLabel: $("nameLabel"),
   trackingLabel: $("trackingLabel"),
   modelSelect: $("modelSelect"),
@@ -220,12 +133,14 @@ const elements = {
 };
 
 const ctx = elements.canvas.getContext("2d");
+const initialTrainingSamples = loadTrainingSamples();
 
 const state = {
   animationFrame: 0,
   cameraFrame: 0,
   sendTimer: 0,
   ws: null,
+  sessionMode: "lobby",
   connected: false,
   running: false,
   source: "gaze",
@@ -249,17 +164,29 @@ const state = {
   peers: new Map(),
   calibration: loadCalibration(),
   calibrationSession: null,
-  trainingSamples: loadTrainingSamples(),
+  trainingSamples: initialTrainingSamples,
   personalModels: loadPersonalModels(),
+  personalStats: loadPersonalStats(initialTrainingSamples),
   trainerSession: null,
+  waveScores: new Map(),
+  pendingWave: null,
   controlsHidden: loadControlsHidden(),
+  debug: {
+    enabled: loadDebugEnabled(),
+    frameCount: 0,
+    fpsStartedAt: performance.now(),
+    fps: 0,
+    inferenceCount: 0,
+    inferenceFailures: 0,
+    lastInferenceMs: 0,
+    avgInferenceMs: 0,
+    lastDebugRefreshAt: 0,
+    lastError: "",
+    lastPrediction: null,
+    samples: [],
+  },
   processingCanvas: document.createElement("canvas"),
-  processingFrameData: null,
-  cropCanvas: document.createElement("canvas"),
 };
-
-let mediaPipePromise = null;
-const gazeModelPromises = new Map();
 
 init();
 
@@ -277,6 +204,7 @@ function init() {
   );
   elements.modelSelect.value = state.modelKey;
   setControlsHidden(state.controlsHidden, false);
+  setDebugVisible(state.debug.enabled, false);
   refreshFullscreenButton();
   refreshPersonalModelLabel();
 
@@ -288,6 +216,9 @@ function init() {
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
     void startSession(false);
+  });
+  elements.dojoButton.addEventListener("click", () => {
+    void startLocalDojoSession();
   });
   elements.createButton.addEventListener("click", () => {
     elements.roomInput.value = generateRoomCode();
@@ -301,14 +232,20 @@ function init() {
   elements.toggleControlsButton.addEventListener("click", () => {
     setControlsHidden(!state.controlsHidden);
   });
-  elements.trainButton.addEventListener("click", () => {
-    void startTrainerRun("train");
+  elements.debugButton.addEventListener("click", () => {
+    setDebugVisible(!state.debug.enabled);
   });
-  elements.evaluateButton.addEventListener("click", () => {
-    void startTrainerRun("eval");
+  elements.exportDebugButton.addEventListener("click", () => {
+    void exportDebugLog();
+  });
+  elements.trainButton.addEventListener("click", () => {
+    void startTrainerRun("dojo");
   });
   elements.challengeButton.addEventListener("click", () => {
-    void startTrainerRun("challenge");
+    void startTrainerRun("solo");
+  });
+  elements.multiplayerButton.addEventListener("click", () => {
+    void requestMultiplayerWaveFromUser();
   });
   elements.resetPersonalButton.addEventListener("click", resetCurrentPersonalModel);
   elements.calibrateButton.addEventListener("click", () => {
@@ -328,12 +265,46 @@ function init() {
   drawLoop();
 }
 
+async function startLocalDojoSession() {
+  setBusy(true);
+  hideToast();
+  state.source = "gaze";
+  elements.mouseModeInput.checked = false;
+
+  const name = normalizePlayerName(elements.nameInput.value);
+  state.local.name = name;
+  state.local.room = "DOJO";
+  state.sessionMode = "dojo";
+  state.local.color = colorForName(name);
+  elements.roomLabel.textContent = "DOJO";
+  elements.roomLabel.title = "Local Dojo";
+  elements.nameLabel.textContent = name;
+  localStorage.setItem("gazeGame.name", name);
+
+  try {
+    setStatus("Starting Dojo");
+    await startGazeSource();
+    state.connected = false;
+    state.running = true;
+    showHud();
+    showToast("Dojo ready. Calibrate, then start Dojo.");
+    window.setTimeout(hideToast, 1800);
+  } catch (error) {
+    stopSession();
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus("Could not start Dojo");
+    showToast(message);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function startSession(createRoom) {
   setBusy(true);
   hideToast();
   state.source = elements.mouseModeInput.checked ? "mouse" : "gaze";
 
-  const name = (elements.nameInput.value || "Guest").trim().slice(0, 32) || "Guest";
+  const name = normalizePlayerName(elements.nameInput.value);
   const room = normalizeRoom(elements.roomInput.value || (createRoom ? generateRoomCode() : ""));
   if (!room) {
     setBusy(false);
@@ -343,6 +314,7 @@ async function startSession(createRoom) {
 
   state.local.name = name;
   state.local.room = room;
+  state.sessionMode = "room";
   state.local.color = colorForName(name);
   elements.roomInput.value = room;
   elements.roomLabel.textContent = room;
@@ -365,7 +337,12 @@ async function startSession(createRoom) {
     showHud();
     state.running = true;
     startSending();
-    if (state.source === "gaze" && !hasAnyCalibrationMapping()) {
+    if (state.pendingWave) {
+      const wave = state.pendingWave;
+      state.pendingWave = null;
+      handleWaveStart(wave);
+    }
+    if (state.source === "gaze" && !hasAnyCalibrationMapping(state.calibration)) {
       showToast("Click Calibrate and keep the page fullscreen for best results.");
     }
   } catch (error) {
@@ -380,8 +357,10 @@ async function startSession(createRoom) {
 
 function stopSession() {
   state.running = false;
+  state.sessionMode = "lobby";
   state.connected = false;
   state.peers.clear();
+  state.waveScores.clear();
   window.clearInterval(state.sendTimer);
   state.sendTimer = 0;
   window.cancelAnimationFrame(state.cameraFrame);
@@ -408,6 +387,7 @@ function stopSession() {
 }
 
 function setBusy(isBusy) {
+  elements.dojoButton.disabled = isBusy;
   elements.createButton.disabled = isBusy;
   elements.joinButton.disabled = isBusy;
 }
@@ -415,6 +395,7 @@ function setBusy(isBusy) {
 function showHud() {
   elements.lobby.classList.add("hidden");
   elements.hud.classList.remove("hidden");
+  syncHudContext();
   syncHudSuppression();
 }
 
@@ -422,6 +403,19 @@ function showLobby() {
   elements.hud.classList.add("hidden");
   elements.hud.classList.remove("hud-suppressed");
   elements.lobby.classList.remove("hidden");
+  syncHudContext();
+}
+
+function syncHudContext() {
+  const view = hudContextView(state.sessionMode);
+  elements.roomScopeLabel.textContent = view.roomScopeLabel;
+  elements.copyRoomButton.classList.toggle("hidden", view.copyRoomHidden);
+  elements.trainButton.classList.toggle("hidden", view.trainHidden);
+  elements.trainButton.textContent = view.trainText;
+  elements.challengeButton.classList.toggle("hidden", view.challengeHidden);
+  elements.multiplayerButton.classList.toggle("hidden", view.multiplayerHidden);
+  elements.resetPersonalButton.classList.toggle("hidden", view.resetPersonalHidden);
+  refreshPersonalModelLabel();
 }
 
 function syncHudSuppression() {
@@ -431,16 +425,14 @@ function syncHudSuppression() {
 
 function setControlsHidden(hidden, persist = true) {
   state.controlsHidden = Boolean(hidden);
-  elements.hud.classList.toggle("hud-controls-hidden", state.controlsHidden);
-  elements.toggleControlsButton.textContent = state.controlsHidden ? "Show buttons" : "Hide buttons";
-  elements.toggleControlsButton.setAttribute("aria-expanded", String(!state.controlsHidden));
-  elements.toggleControlsButton.setAttribute("aria-pressed", String(state.controlsHidden));
-  elements.toggleControlsButton.setAttribute(
-    "aria-label",
-    state.controlsHidden ? "Show buttons" : "Hide buttons",
-  );
+  const view = controlsHiddenView(state.controlsHidden);
+  elements.hud.classList.toggle("hud-controls-hidden", view.hidden);
+  elements.toggleControlsButton.textContent = view.buttonText;
+  elements.toggleControlsButton.setAttribute("aria-expanded", view.ariaExpanded);
+  elements.toggleControlsButton.setAttribute("aria-pressed", view.ariaPressed);
+  elements.toggleControlsButton.setAttribute("aria-label", view.ariaLabel);
   if (persist) {
-    localStorage.setItem("gazeGame.controlsHidden", state.controlsHidden ? "1" : "0");
+    localStorage.setItem("gazeGame.controlsHidden", view.storageValue);
   }
 }
 
@@ -459,6 +451,9 @@ function handleGlobalKeydown(event) {
   } else if (key === "f") {
     event.preventDefault();
     void toggleFullscreen();
+  } else if (key === "d") {
+    event.preventDefault();
+    setDebugVisible(!state.debug.enabled);
   }
 }
 
@@ -531,8 +526,6 @@ async function startGazeSource() {
   ]);
   state.faceLandmarker = faceLandmarker;
   state.gazeModel = gazeModel;
-  state.cropCanvas.width = EYE_CROP_WIDTH;
-  state.cropCanvas.height = EYE_CROP_HEIGHT;
   if (!state.gazeModel) {
     showToast("Browser model unavailable; using fallback gaze.");
   }
@@ -544,53 +537,6 @@ async function startGazeSource() {
 function startMouseSource() {
   state.local.tracking = true;
   setTrackingStatus("Mouse");
-}
-
-async function loadFaceLandmarker() {
-  if (!mediaPipePromise) {
-    mediaPipePromise = import(TASKS_URL).then(async ({ FaceLandmarker, FilesetResolver }) => {
-      const vision = await FilesetResolver.forVisionTasks(WASM_URL);
-      return FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: FACE_MODEL_URL,
-          delegate: "CPU",
-        },
-        runningMode: "VIDEO",
-        numFaces: 1,
-        minFaceDetectionConfidence: 0.5,
-        minFacePresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-        outputFacialTransformationMatrixes: true,
-      });
-    });
-  }
-  return mediaPipePromise;
-}
-
-async function loadGazeModel(modelKey) {
-  const config = modelConfig(modelKey);
-  if (!gazeModelPromises.has(config.key)) {
-    gazeModelPromises.set(
-      config.key,
-      import(ORT_URL).then(async (ort) => {
-        ort.env.wasm.wasmPaths = ORT_WASM_PATH;
-        ort.env.wasm.numThreads = 1;
-        const session = await ort.InferenceSession.create(config.url, {
-          executionProviders: ["wasm"],
-          graphOptimizationLevel: "all",
-        });
-        return {
-          ort,
-          session,
-          key: config.key,
-          label: config.label,
-          extraFeatureKeys: config.extraFeatureKeys,
-          inputNames: new Set(session.inputNames),
-        };
-      }),
-    );
-  }
-  return gazeModelPromises.get(config.key);
 }
 
 async function switchGazeModel(modelKey) {
@@ -635,6 +581,7 @@ function readGazeFrame() {
       .then((reading) => applyGazeReading(reading))
       .catch((error) => {
         console.warn("Gaze frame failed", error);
+        recordInferenceFailureDebug(error);
         state.local.tracking = false;
         setTrackingStatus("Camera paused");
       })
@@ -647,32 +594,35 @@ function readGazeFrame() {
 }
 
 async function processGazeFrame() {
-  drawMirroredVideoFrame();
+  const startedAt = performance.now();
+  const frame = drawMirroredVideoFrame(elements.video, state.processingCanvas);
   const result = state.faceLandmarker.detectForVideo(state.processingCanvas, performance.now());
-  return estimateGaze(result);
-}
-
-function drawMirroredVideoFrame() {
-  const width = elements.video.videoWidth || 1;
-  const height = elements.video.videoHeight || 1;
-  if (state.processingCanvas.width !== width || state.processingCanvas.height !== height) {
-    state.processingCanvas.width = width;
-    state.processingCanvas.height = height;
-  }
-  const context = state.processingCanvas.getContext("2d", { willReadFrequently: true });
-  context.save();
-  context.clearRect(0, 0, width, height);
-  context.translate(width, 0);
-  context.scale(-1, 1);
-  context.drawImage(elements.video, 0, 0, width, height);
-  context.restore();
-  state.processingFrameData = context.getImageData(0, 0, width, height);
+  const reading = await estimateGaze(result, {
+    gazeModel: state.gazeModel,
+    frame,
+    onModelError(error) {
+      console.warn("ONNX gaze inference failed; using fallback.", error);
+      recordInferenceFailureDebug(error);
+    },
+  });
+  recordInferenceDebug(performance.now() - startedAt);
+  return reading;
 }
 
 function applyGazeReading(reading) {
   if (!reading?.tracking) {
     state.local.tracking = false;
     state.rawReading = null;
+    state.debug.lastPrediction = {
+      tracking: false,
+      method: "none",
+      rawX: null,
+      rawY: null,
+      x: state.local.x,
+      y: state.local.y,
+      kind: state.modelKey,
+    };
+    recordDebugSample({ event: "gaze", tracking: false, method: "none" });
     setTrackingStatus("No face");
     if (state.calibrationSession?.active) {
       elements.calibrationBody.textContent = "Face lost. Look back at the camera, then keep staring at the dot.";
@@ -692,20 +642,37 @@ function applyGazeReading(reading) {
   state.local.x = state.local.tracking ? lerp(state.local.x, nextX, alpha) : nextX;
   state.local.y = state.local.tracking ? lerp(state.local.y, nextY, alpha) : nextY;
   state.local.tracking = true;
+  state.debug.lastPrediction = {
+    tracking: true,
+    method: predicted.method,
+    rawX: reading.rawX,
+    rawY: reading.rawY,
+    x: state.local.x,
+    y: state.local.y,
+    kind: reading.kind,
+  };
+  recordDebugSample({
+    event: "gaze",
+    tracking: true,
+    kind: reading.kind,
+    method: predicted.method,
+    rawX: reading.rawX,
+    rawY: reading.rawY,
+    x: state.local.x,
+    y: state.local.y,
+  });
   updateTrainerRun(reading, {
     active: {
       x: state.local.x,
       y: state.local.y,
       method: predicted.method,
     },
-    base: basePrediction,
-    personal: personalPrediction,
   });
   setTrackingStatus(trackingStatusFor(reading, predicted.method));
 }
 
 function calibrateReading(reading) {
-  const mapping = getCalibrationMapping(reading.kind);
+  const mapping = getCalibrationMapping(state.calibration, reading.kind);
   if (mapping) {
     const mapped = mapPointWithCalibration([reading.rawX, reading.rawY], mapping);
     if (mapped) {
@@ -733,11 +700,11 @@ function calibrateReading(reading) {
 }
 
 function trackingStatusFor(reading, method) {
-  const config = GAZE_MODELS[reading.kind];
-  if (config) {
-    if (method === "personal") return `${config.label} + personal NN`;
-    if (method === "calibration") return `${config.label} calibrated`;
-    return config.label;
+  const label = gazeModelLabel(reading.kind);
+  if (label) {
+    if (method === "personal") return `${label} + personal NN`;
+    if (method === "calibration") return `${label} calibrated`;
+    return label;
   }
   return method === "calibration" ? "Fallback calibrated" : "Fallback";
 }
@@ -923,7 +890,39 @@ async function maybeEnterFullscreen() {
   await enterFullscreen(false);
 }
 
-async function startTrainerRun(mode) {
+async function requestMultiplayerWaveFromUser() {
+  if (!state.connected || !relayIsOpen(state.ws)) {
+    showToast("Join or create a room before starting multiplayer.");
+    return;
+  }
+  if (state.source !== "gaze" || !state.running) {
+    return;
+  }
+  if (!state.rawReading?.tracking) {
+    showToast("Wait for face tracking first.");
+    return;
+  }
+
+  const kind = state.rawReading.kind || state.modelKey;
+  if (!state.personalModels[kind]) {
+    showToast("Enter the Dojo and train your personal NN first.");
+    return;
+  }
+
+  hideToast();
+  await maybeEnterFullscreen();
+  const seed = createWaveSeed();
+  sendRelayMessage(
+    state.ws,
+    buildWaveStartMessage({
+      room: state.local.room,
+      seed,
+      durationMs: CHALLENGE_DURATION_MS,
+    }),
+  );
+}
+
+async function startTrainerRun(mode, options = {}) {
   if (state.source !== "gaze" || !state.running) {
     return;
   }
@@ -933,40 +932,28 @@ async function startTrainerRun(mode) {
   }
 
   hideToast();
-  await maybeEnterFullscreen();
+  if (!options.skipFullscreen) {
+    await maybeEnterFullscreen();
+  }
   cancelCalibration(false);
 
   const kind = state.rawReading.kind || state.modelKey;
-  if ((mode === "eval" || mode === "challenge") && !state.personalModels[kind]) {
-    showToast("Train a personal NN first.");
+  if (isWaveMode(mode) && !state.personalModels[kind]) {
+    showToast("Enter the Dojo and train your personal NN first.");
     return;
   }
-  const now = performance.now();
-  const targets =
-    mode === "challenge"
-      ? [randomChallengeTarget()]
-      : shuffledTargets(mode === "eval" ? EVAL_TARGETS : TRAIN_TARGETS);
-
-  state.trainerSession = {
-    active: true,
+  const wave = options.wave || null;
+  state.waveScores.clear();
+  for (const score of trainerWaveScoreMap(wave).values()) {
+    state.waveScores.set(score.id, score);
+  }
+  state.trainerSession = createTrainerSession({
     mode,
     kind,
-    targets,
-    stepIndex: 0,
-    phase: mode === "challenge" ? "active" : "settle",
-    phaseStartedAt: now,
-    startedAt: now,
-    endsAt: mode === "challenge" ? now + CHALLENGE_DURATION_MS : 0,
-    samples: [],
-    capturedSamples: [],
-    errors: [],
-    baseErrors: [],
-    personalErrors: [],
-    score: 0,
-    dwellStartedAt: 0,
-    lastErrorPx: null,
-    lastUiAt: 0,
-  };
+    wave,
+    now: performance.now(),
+    wallNow: Date.now(),
+  });
   refreshTrainerOverlay();
 }
 
@@ -985,150 +972,95 @@ function updateTrainerRun(reading, point) {
   if (!session?.active) {
     return;
   }
-  if (reading.kind !== session.kind) {
-    elements.trainerBody.textContent = "Model changed. Start a new run.";
+  const result = advanceTrainerSession(session, {
+    reading,
+    activePoint: point.active,
+    now: performance.now(),
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    targetMapper: trainerTargetForOverlay,
+  });
+
+  if (result.type === "kind_mismatch") {
+    elements.trainerBody.textContent = result.message;
     return;
   }
-
-  if (session.mode === "challenge") {
-    updateChallengeRun(session, point.active);
-    return;
+  if (result.hitTarget && session.mode === "multiplayer") {
+    sendWaveHit(session, result.hitTarget);
   }
-
-  const now = performance.now();
-  const settleMs = session.mode === "eval" ? EVAL_SETTLE_MS : TRAIN_SETTLE_MS;
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
-  const minSamples =
-    session.mode === "eval" ? EVAL_MIN_SAMPLES_PER_TARGET : TRAIN_MIN_SAMPLES_PER_TARGET;
-  const target = visibleOverlayTarget(session.targets[session.stepIndex], ".trainer-dock");
-  if (!target) {
+  if (result.complete) {
     finishTrainerRun(session);
     return;
   }
-
-  if (session.phase === "settle") {
-    if (now - session.phaseStartedAt >= settleMs) {
-      session.phase = "capture";
-      session.phaseStartedAt = now;
-      session.samples = [];
-      refreshTrainerOverlay();
-    }
-    return;
-  }
-
-  if (session.mode === "train") {
-    const sample = createTrainingSample(reading, target, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
-    if (sample) {
-      session.samples.push(sample);
-    }
-  } else {
-    const activeError = distanceToTargetPx(point.active, target);
-    session.samples.push(activeError);
-    session.baseErrors.push(distanceToTargetPx(point.base, target));
-    if (point.personal) {
-      session.personalErrors.push(distanceToTargetPx(point.personal, target));
-    }
-  }
-
-  if (now - session.lastUiAt > 150) {
-    session.lastUiAt = now;
+  if (result.refresh) {
     refreshTrainerOverlay();
   }
-
-  if (now - session.phaseStartedAt < captureMs || session.samples.length < minSamples) {
-    return;
-  }
-
-  if (session.mode === "train") {
-    session.capturedSamples.push(...session.samples);
-  } else {
-    session.errors.push(...session.samples);
-  }
-
-  session.stepIndex += 1;
-  if (session.stepIndex >= session.targets.length) {
-    finishTrainerRun(session);
-    return;
-  }
-
-  session.phase = "settle";
-  session.phaseStartedAt = now;
-  session.samples = [];
-  refreshTrainerOverlay();
 }
 
-function updateChallengeRun(session, point) {
-  const now = performance.now();
-  if (now >= session.endsAt) {
-    finishTrainerRun(session);
+function trainerTargetForOverlay(target) {
+  return visibleOverlayTarget(target, ".trainer-dock");
+}
+
+function sendWaveHit(session, target) {
+  if (!state.connected || !relayIsOpen(state.ws)) {
     return;
   }
-
-  const target = visibleOverlayTarget(session.targets[0], ".trainer-dock");
-  const errorPx = distanceToTargetPx(point, target);
-  session.lastErrorPx = errorPx;
-  if (errorPx <= CHALLENGE_TARGET_RADIUS_PX) {
-    if (!session.dwellStartedAt) {
-      session.dwellStartedAt = now;
-    }
-    if (now - session.dwellStartedAt >= CHALLENGE_DWELL_MS) {
-      session.score += 1;
-      session.targets = [randomChallengeTarget(target)];
-      session.dwellStartedAt = 0;
-      session.phaseStartedAt = now;
-    }
-  } else {
-    session.dwellStartedAt = 0;
-  }
-
-  if (now - session.lastUiAt > 150) {
-    session.lastUiAt = now;
-    refreshTrainerOverlay();
-  }
+  sendRelayMessage(
+    state.ws,
+    buildWaveHitMessage({
+      room: state.local.room,
+      waveId: session.waveId,
+      targetId: target?.id || "",
+      score: session.score,
+    }),
+  );
 }
 
 function finishTrainerRun(session) {
   state.trainerSession = null;
   refreshTrainerOverlay();
-  if (session.mode === "train") {
+  if (session.mode === "dojo") {
     void finishTrainingRun(session);
     return;
   }
-  if (session.mode === "eval") {
-    finishEvaluationRun(session);
-    return;
-  }
-  showToast(`Challenge complete: ${session.score} hits.`);
+  showToast(`${trainerModeLabel(session.mode)} complete: ${session.score} takedowns.`);
   window.setTimeout(hideToast, 1800);
 }
 
 async function finishTrainingRun(session) {
   const trainingUpdate = appendTrainingSamples(state.trainingSamples, session.capturedSamples);
   state.trainingSamples = saveTrainingSamples(trainingUpdate.samples);
-  refreshPersonalModelLabel();
+  const samples = samplesForKind(state.trainingSamples, session.kind);
+  state.personalStats = recordTrainingSamples(
+    state.personalStats,
+    session.kind,
+    trainingUpdate.addedCount,
+    samples.length,
+  );
   if (trainingUpdate.addedCount < 1) {
+    refreshPersonalModelLabel();
     showToast("No usable samples collected.");
     return;
   }
 
-  const samples = samplesForKind(state.trainingSamples, session.kind);
+  refreshPersonalModelLabel();
   if (samples.length < PERSONAL_MIN_SAMPLES) {
     showToast(`Saved ${samples.length} samples. Need ${PERSONAL_MIN_SAMPLES} to train.`);
     return;
   }
 
-  showToast(`Training personal NN on ${samples.length} samples...`);
+  showToast(`Training personal NN from ${samples.length} Dojo samples...`);
   await nextFrame();
   try {
     const model = trainPersonalModel(session.kind, samples);
+    const stats = personalStatsForKind(state.personalStats, session.kind, state.trainingSamples);
+    model.totalSampleCount = stats.totalSamples;
+    model.retainedSampleCount = samples.length;
     state.personalModels[session.kind] = model;
     savePersonalModels(state.personalModels);
     refreshPersonalModelLabel();
     showToast(
-      `Personal NN ready: ${samples.length} samples, ${Math.round(model.fitMeanPx)} px fit.`,
+      `Dojo complete: ${stats.totalSamples} total samples, ${Math.round(model.fitMeanPx)} px fit.`,
     );
     window.setTimeout(hideToast, 2200);
   } catch (error) {
@@ -1137,70 +1069,20 @@ async function finishTrainingRun(session) {
   }
 }
 
-function finishEvaluationRun(session) {
-  if (!session.errors.length) {
-    showToast("No test samples collected.");
-    return;
-  }
-  const meanPx = mean(session.personalErrors.length ? session.personalErrors : session.errors);
-  const baseMeanPx = session.baseErrors.length ? mean(session.baseErrors) : null;
-  const improvementPx = baseMeanPx === null ? null : baseMeanPx - meanPx;
-  const model = state.personalModels[session.kind];
-  if (model) {
-    model.lastEvalMeanPx = meanPx;
-    model.lastBaseEvalMeanPx = baseMeanPx;
-    model.lastEvalDeltaPx = improvementPx;
-    model.lastEvalAt = Date.now();
-    savePersonalModels(state.personalModels);
-  }
-  refreshPersonalModelLabel();
-  if (improvementPx !== null) {
-    const direction = improvementPx >= 0 ? "better" : "worse";
-    showToast(`Test: ${Math.round(meanPx)} px, ${Math.abs(Math.round(improvementPx))} px ${direction}.`);
-  } else {
-    showToast(`Test complete: ${Math.round(meanPx)} px mean error.`);
-  }
-  window.setTimeout(hideToast, 2200);
-}
-
 function refreshTrainerOverlay() {
-  const session = state.trainerSession;
+  const view = trainerOverlayView(state.trainerSession, { now: performance.now() });
   syncHudSuppression();
-  if (!session?.active) {
+  if (view.hidden) {
     elements.trainerOverlay.classList.add("hidden");
     elements.trainerProgressFill.style.width = "0%";
     return;
   }
 
   elements.trainerOverlay.classList.remove("hidden");
-  if (session.mode === "challenge") {
-    const secondsLeft = Math.max(0, Math.ceil((session.endsAt - performance.now()) / 1000));
-    const progress = clamp01((performance.now() - session.startedAt) / CHALLENGE_DURATION_MS);
-    elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
-    elements.trainerStep.textContent = `Compete · ${secondsLeft}s`;
-    elements.trainerTitle.textContent = `${session.score} hits`;
-    elements.trainerBody.textContent =
-      session.lastErrorPx === null ? "Acquire targets." : `${Math.round(session.lastErrorPx)} px`;
-    return;
-  }
-
-  const total = session.targets.length;
-  const label = session.mode === "eval" ? "Test" : "Training";
-  const targetProgress = session.stepIndex / total;
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
-  const phaseProgress =
-    session.phase === "capture"
-      ? Math.min(1, (performance.now() - session.phaseStartedAt) / captureMs)
-      : 0;
-  const progress = targetProgress + phaseProgress / total;
-  elements.trainerProgressFill.style.width = `${Math.round(progress * 100)}%`;
-  elements.trainerStep.textContent = `${label} ${session.stepIndex + 1} of ${total}`;
-  elements.trainerTitle.textContent = session.phase === "capture" ? "Hold target" : "Acquire target";
-  if (session.mode === "train") {
-    elements.trainerBody.textContent = `${session.capturedSamples.length + session.samples.length} samples`;
-  } else {
-    elements.trainerBody.textContent = `${session.errors.length + session.samples.length} readings`;
-  }
+  elements.trainerProgressFill.style.width = `${view.progressPercent}%`;
+  elements.trainerStep.textContent = view.step;
+  elements.trainerTitle.textContent = view.title;
+  elements.trainerBody.textContent = view.body;
 }
 
 function resetCurrentPersonalModel() {
@@ -1219,6 +1101,11 @@ function resetCurrentPersonalModel() {
   state.trainingSamples = state.trainingSamples.filter((sample) => sample.kind !== kind);
   savePersonalModels(state.personalModels);
   state.trainingSamples = saveTrainingSamples(state.trainingSamples);
+  state.personalStats = clearPersonalStatsForKind(
+    state.personalStats,
+    kind,
+    samplesForKind(state.trainingSamples, kind).length,
+  );
   refreshPersonalModelLabel();
   showToast(
     hadModel || before !== state.trainingSamples.length ? "Personal NN reset." : "No personal NN data.",
@@ -1233,95 +1120,72 @@ function updateMouseSource(event) {
   state.local.x = clamp01(event.clientX / Math.max(window.innerWidth, 1));
   state.local.y = clamp01(event.clientY / Math.max(window.innerHeight, 1));
   state.local.tracking = true;
+  state.debug.lastPrediction = {
+    tracking: true,
+    method: "mouse",
+    rawX: null,
+    rawY: null,
+    x: state.local.x,
+    y: state.local.y,
+    kind: "mouse",
+  };
+  recordDebugSample({
+    event: "mouse",
+    tracking: true,
+    method: "mouse",
+    x: state.local.x,
+    y: state.local.y,
+  });
 }
 
 function connectRelay() {
   const relayUrl = normalizeRelayUrl(elements.relayInput.value);
   elements.relayInput.value = relayUrl;
+  localStorage.setItem("gazeGame.relay", relayUrl);
 
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(relayUrl);
-    state.ws = ws;
-    let settled = false;
-    const timeout = window.setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        ws.close();
-        reject(new Error("Relay connection timed out."));
+  return connectRelaySocket({
+    url: relayUrl,
+    room: state.local.room,
+    name: state.local.name,
+    color: state.local.color,
+    onWelcome(message) {
+      state.local.id = message.id;
+      state.connected = true;
+      state.pendingWave = normalizeRelayWave(message.wave);
+      state.peers.clear();
+      for (const peer of message.peers || []) {
+        state.peers.set(peer.id, {
+          id: peer.id,
+          name: peer.name || "Guest",
+          color: peer.color || [255, 255, 255],
+          x: null,
+          y: null,
+          tracking: false,
+          lastSeen: 0,
+        });
       }
-    }, 8000);
-
-    ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({
-          type: "join",
-          room: state.local.room,
-          name: state.local.name,
-          color: state.local.color,
-        }),
-      );
-    });
-
-    ws.addEventListener("message", (event) => {
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-
-      if (message.type === "welcome") {
-        state.local.id = message.id;
-        state.connected = true;
-        state.peers.clear();
-        for (const peer of message.peers || []) {
-          state.peers.set(peer.id, {
-            id: peer.id,
-            name: peer.name || "Guest",
-            color: peer.color || [255, 255, 255],
-            x: null,
-            y: null,
-            tracking: false,
-            lastSeen: 0,
-          });
-        }
-        setTrackingStatus(state.source === "mouse" ? "Mouse" : "Gaze");
-        if (!settled) {
-          settled = true;
-          window.clearTimeout(timeout);
-          resolve();
-        }
-        return;
-      }
-
-      handleRelayMessage(message);
-    });
-
-    ws.addEventListener("error", () => {
-      if (!settled) {
-        settled = true;
-        window.clearTimeout(timeout);
-        reject(new Error(`Could not connect to ${relayUrl}`));
-      }
-    });
-
-    ws.addEventListener("close", () => {
-      if (!settled) {
-        settled = true;
-        window.clearTimeout(timeout);
-        reject(new Error("Relay closed before joining."));
-        return;
-      }
+      setTrackingStatus(state.source === "mouse" ? "Mouse" : "Gaze");
+    },
+    onMessage: handleRelayMessage,
+    onDisconnect() {
       if (state.running) {
         state.connected = false;
         setTrackingStatus("Disconnected");
         showToast("Relay disconnected");
       }
-    });
+    },
+  }).then((ws) => {
+    state.ws = ws;
   });
 }
 
 function handleRelayMessage(message) {
+  if (message.type === "error") {
+    showToast(`Relay error: ${message.message || "unknown_error"}`);
+    window.setTimeout(hideToast, 1800);
+    return;
+  }
+
   if (message.type === "peer_join") {
     state.peers.set(message.id, {
       id: message.id,
@@ -1358,651 +1222,121 @@ function handleRelayMessage(message) {
     peer.tracking = Boolean(message.tracking) && hasCoordinates;
     peer.lastSeen = performance.now();
     state.peers.set(message.id, peer);
+    return;
+  }
+
+  if (message.type === "wave_start") {
+    handleWaveStart(normalizeRelayWave(message));
+    return;
+  }
+
+  if (message.type === "wave_score") {
+    handleWaveScore(message);
+  }
+}
+
+function handleWaveStart(wave) {
+  if (!wave) {
+    return;
+  }
+  if (state.trainerSession?.active) {
+    if (state.trainerSession.waveId !== wave.id) {
+      showToast(`${wave.startedByName || "A player"} started a wave.`);
+      window.setTimeout(hideToast, 1600);
+    }
+    return;
+  }
+  if (!state.running || state.source !== "gaze") {
+    return;
+  }
+  const kind = state.rawReading?.kind || state.modelKey;
+  if (!state.personalModels[kind]) {
+    showToast("Multiplayer wave started. Finish Dojo training to join waves.");
+    window.setTimeout(hideToast, 2200);
+    return;
+  }
+  if (!state.rawReading?.tracking) {
+    showToast("Multiplayer wave started. Wait for face tracking, then start the next wave.");
+    window.setTimeout(hideToast, 2200);
+    return;
+  }
+  void startTrainerRun("multiplayer", { wave, skipFullscreen: true });
+}
+
+function handleWaveScore(message) {
+  const session = state.trainerSession;
+  if (!session?.active || session.mode !== "multiplayer" || message.wave_id !== session.waveId) {
+    return;
+  }
+  const id = String(message.id || "");
+  if (!id) {
+    return;
+  }
+  const score = {
+    id,
+    name: message.name || "Guest",
+    color: Array.isArray(message.color) ? message.color : [255, 255, 255],
+    score: Math.max(0, Number(message.score) || 0),
+  };
+  state.waveScores.set(id, score);
+  if (id === state.local.id) {
+    session.score = score.score;
   }
 }
 
 function startSending() {
   window.clearInterval(state.sendTimer);
-  state.sendTimer = window.setInterval(sendCursor, 33);
+  state.sendTimer = window.setInterval(sendCursor, RELAY_SEND_INTERVAL_MS);
 }
 
 function sendCursor() {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.connected) {
+  if (!state.connected || !relayIsOpen(state.ws)) {
     return;
   }
   const calibrationActive = Boolean(state.calibrationSession?.active);
   const trainerHidden = Boolean(
-    state.trainerSession?.active && state.trainerSession.mode !== "challenge",
+    state.trainerSession?.active && !isMultiplayerWaveMode(state.trainerSession.mode),
   );
   state.seq += 1;
-  state.ws.send(
-    JSON.stringify({
-      type: "cursor",
+  sendRelayMessage(
+    state.ws,
+    buildCursorMessage({
       room: state.local.room,
       x: state.local.tracking && !calibrationActive && !trainerHidden ? state.local.x : null,
       y: state.local.tracking && !calibrationActive && !trainerHidden ? state.local.y : null,
       tracking: state.local.tracking && !calibrationActive && !trainerHidden,
       seq: state.seq,
-      ts: Date.now(),
     }),
   );
 }
 
 function drawLoop() {
   drawStage();
+  refreshDebugPanel();
   state.animationFrame = window.requestAnimationFrame(drawLoop);
 }
 
 function drawStage() {
-  const dpr = Math.max(window.devicePixelRatio || 1, 1);
-  const width = Math.floor(elements.canvas.clientWidth * dpr);
-  const height = Math.floor(elements.canvas.clientHeight * dpr);
-  if (elements.canvas.width !== width || elements.canvas.height !== height) {
-    elements.canvas.width = width;
-    elements.canvas.height = height;
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  const w = elements.canvas.clientWidth;
-  const h = elements.canvas.clientHeight;
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#05080d";
-  ctx.fillRect(0, 0, w, h);
-  drawGrid(w, h);
-
-  for (const peer of state.peers.values()) {
-    if (peer.x === null || peer.y === null) {
-      continue;
-    }
-    const age = performance.now() - peer.lastSeen;
-    const alpha = peer.tracking ? Math.max(0.25, 1 - age / 3000) : 0.2;
-    drawCursor(peer.x, peer.y, peer.color, peer.name, alpha, false);
-  }
-
-  const trainerHidesCursor = Boolean(
-    state.trainerSession?.active && state.trainerSession.mode !== "challenge",
-  );
-  if (state.local.tracking && !state.calibrationSession?.active && !trainerHidesCursor) {
-    drawCursor(state.local.x, state.local.y, state.local.color, state.local.name, 1, true);
-  }
-  if (state.calibrationSession?.active) {
-    drawCalibrationTarget(w, h);
-  }
-  if (state.trainerSession?.active) {
-    drawTrainerTarget(w, h);
-  }
-}
-
-function drawGrid(width, height) {
-  const minor = 96;
-  const major = minor * 2;
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= width; x += minor) {
-    ctx.strokeStyle = x % major === 0 ? "rgba(122, 170, 255, 0.18)" : "rgba(122, 170, 255, 0.1)";
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, height);
-    ctx.stroke();
-  }
-  for (let y = 0; y <= height; y += minor) {
-    ctx.strokeStyle = y % major === 0 ? "rgba(122, 170, 255, 0.18)" : "rgba(122, 170, 255, 0.1)";
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-  }
-}
-
-function drawCursor(x, y, color, label, alpha, isLocal) {
-  const px = x * elements.canvas.clientWidth;
-  const py = y * elements.canvas.clientHeight;
-  const rgb = `${color[0]}, ${color[1]}, ${color[2]}`;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.shadowBlur = isLocal ? 24 : 16;
-  ctx.shadowColor = `rgba(${rgb}, 0.85)`;
-  ctx.fillStyle = `rgba(${rgb}, ${isLocal ? 0.98 : 0.86})`;
-  ctx.beginPath();
-  ctx.arc(px, py, isLocal ? 9 : 7, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = `rgba(${rgb}, 0.72)`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(px, py, isLocal ? 18 : 14, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.font = "13px Inter, ui-sans-serif, system-ui, sans-serif";
-  ctx.textBaseline = "middle";
-  const text = label || "Guest";
-  const textWidth = ctx.measureText(text).width;
-  const labelX = Math.min(px + 18, elements.canvas.clientWidth - textWidth - 18);
-  const labelY = Math.max(18, py - 22);
-  ctx.fillStyle = "rgba(5, 8, 13, 0.82)";
-  roundRect(ctx, labelX - 8, labelY - 12, textWidth + 16, 24, 6);
-  ctx.fill();
-  ctx.fillStyle = `rgba(${rgb}, 0.98)`;
-  ctx.fillText(text, labelX, labelY);
-  ctx.restore();
-}
-
-function roundRect(context, x, y, width, height, radius) {
-  context.beginPath();
-  context.moveTo(x + radius, y);
-  context.arcTo(x + width, y, x + width, y + height, radius);
-  context.arcTo(x + width, y + height, x, y + height, radius);
-  context.arcTo(x, y + height, x, y, radius);
-  context.arcTo(x, y, x + width, y, radius);
-  context.closePath();
-}
-
-function drawCalibrationTarget(width, height) {
-  const session = state.calibrationSession;
-  if (!session?.active) {
-    return;
-  }
-  const target = visibleOverlayTarget(CALIBRATION_TARGETS[session.stepIndex], ".calibration-card");
-  if (!target) {
-    return;
-  }
-
-  const px = target.x * width;
-  const py = target.y * height;
-  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
-
-  ctx.save();
-  ctx.shadowBlur = 28;
-  ctx.shadowColor = "rgba(117, 216, 255, 0.75)";
-  ctx.strokeStyle = "rgba(117, 216, 255, 0.92)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(px, py, 26 + pulse * 6, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = "rgba(156, 255, 210, 0.98)";
-  ctx.beginPath();
-  ctx.arc(px, py, 6, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(156, 255, 210, 0.68)";
-  ctx.beginPath();
-  ctx.moveTo(px - 18, py);
-  ctx.lineTo(px + 18, py);
-  ctx.moveTo(px, py - 18);
-  ctx.lineTo(px, py + 18);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawTrainerTarget(width, height) {
-  const session = state.trainerSession;
-  if (!session?.active) {
-    return;
-  }
-  const target = visibleOverlayTarget(session.targets[session.stepIndex] || session.target, ".trainer-dock");
-  if (!target) {
-    return;
-  }
-
-  const px = target.x * width;
-  const py = target.y * height;
-  const now = performance.now();
-  const phaseElapsed = now - (session.phaseStartedAt || now);
-  const captureMs = session.mode === "eval" ? EVAL_CAPTURE_MS : TRAIN_CAPTURE_MS;
-  const radius =
-    session.mode === "challenge"
-      ? CHALLENGE_TARGET_RADIUS_PX
-      : 18 + Math.min(1, phaseElapsed / captureMs) * 12;
-  const isCapture = session.phase === "capture" || session.mode === "challenge";
-  const pulse = 0.5 + 0.5 * Math.sin(now / 120);
-  const stroke =
-    session.mode === "challenge"
-      ? "rgba(255, 213, 112, 0.95)"
-      : isCapture
-        ? "rgba(156, 255, 210, 0.95)"
-        : "rgba(117, 216, 255, 0.94)";
-  const fill =
-    session.mode === "challenge" ? "rgba(255, 213, 112, 0.98)" : "rgba(156, 255, 210, 0.98)";
-
-  ctx.save();
-  ctx.shadowBlur = 30;
-  ctx.shadowColor = stroke;
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(px, py, radius + pulse * 5, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = fill;
-  ctx.beginPath();
-  ctx.arc(px, py, Math.max(6, radius * 0.2), 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(238, 243, 255, 0.58)";
-  ctx.beginPath();
-  ctx.moveTo(px - radius * 0.72, py);
-  ctx.lineTo(px + radius * 0.72, py);
-  ctx.moveTo(px, py - radius * 0.72);
-  ctx.lineTo(px, py + radius * 0.72);
-  ctx.stroke();
-  if (session.mode === "challenge") {
-    ctx.font = "700 18px Inter, ui-sans-serif, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(5, 8, 13, 0.88)";
-    ctx.fillText(String(session.score), px, py);
-  }
-  ctx.restore();
-}
-
-async function estimateGaze(result) {
-  const landmarks = result?.faceLandmarks?.[0];
-  if (!landmarks) {
-    return { tracking: false };
-  }
-
-  const featureFrame = buildFeatureFrame(landmarks, result);
-  if (state.gazeModel) {
-    try {
-      return await predictWithGazeModel(featureFrame);
-    } catch (error) {
-      console.warn("ONNX gaze inference failed; using fallback.", error);
-    }
-  }
-  return estimateHeuristicGaze(featureFrame);
-}
-
-function buildFeatureFrame(landmarks, result) {
-  const leftEye = computeEyeFeature(
-    landmarks,
-    LEFT_EYE_CORNER_POINTS,
-    LEFT_EYE_UPPER_LID_POINTS,
-    LEFT_EYE_LOWER_LID_POINTS,
-    LEFT_IRIS_POINTS,
-  );
-  const rightEye = computeEyeFeature(
-    landmarks,
-    RIGHT_EYE_CORNER_POINTS,
-    RIGHT_EYE_UPPER_LID_POINTS,
-    RIGHT_EYE_LOWER_LID_POINTS,
-    RIGHT_IRIS_POINTS,
-  );
-  const face = computeFaceFeature(landmarks);
-  const pose = computeHeadPose(firstMatrix(result));
-  const payload = buildFeaturePayload(leftEye, rightEye, face, pose);
-
-  return {
-    landmarks,
-    leftEye,
-    rightEye,
-    face,
-    pose,
-    payload,
-  };
-}
-
-async function predictWithGazeModel(featureFrame) {
-  const leftEyeTensor = extractEyeCropTensor(
-    featureFrame.landmarks,
-    LEFT_EYE_CORNER_POINTS,
-    LEFT_EYE_UPPER_LID_POINTS,
-    LEFT_EYE_LOWER_LID_POINTS,
-    false,
-  );
-  const rightEyeTensor = extractEyeCropTensor(
-    featureFrame.landmarks,
-    RIGHT_EYE_CORNER_POINTS,
-    RIGHT_EYE_UPPER_LID_POINTS,
-    RIGHT_EYE_LOWER_LID_POINTS,
-    true,
-  );
-
-  const headFeatures = new Float32Array(
-    HEAD_FEATURE_KEYS.map((key) =>
-      featureValue(featureFrame.payload, key, HEAD_FEATURE_DEFAULTS[key] ?? 0),
-    ),
-  );
-  const extraFeatureKeys = state.gazeModel.extraFeatureKeys || [];
-  const extraFeatures = new Float32Array(
-    extraFeatureKeys.map((key) =>
-      featureValue(featureFrame.payload, key, EXTRA_FEATURE_DEFAULTS[key] ?? 0),
-    ),
-  );
-  const feeds = {};
-  if (state.gazeModel.inputNames.has("left_eye")) {
-    feeds.left_eye = new state.gazeModel.ort.Tensor("float32", leftEyeTensor, [
-      1,
-      1,
-      EYE_CROP_HEIGHT,
-      EYE_CROP_WIDTH,
-    ]);
-  }
-  if (state.gazeModel.inputNames.has("right_eye")) {
-    feeds.right_eye = new state.gazeModel.ort.Tensor("float32", rightEyeTensor, [
-      1,
-      1,
-      EYE_CROP_HEIGHT,
-      EYE_CROP_WIDTH,
-    ]);
-  }
-  if (state.gazeModel.inputNames.has("head_features")) {
-    feeds.head_features = new state.gazeModel.ort.Tensor("float32", headFeatures, [
-      1,
-      HEAD_FEATURE_KEYS.length,
-    ]);
-  }
-  if (state.gazeModel.inputNames.has("extra_features")) {
-    feeds.extra_features = new state.gazeModel.ort.Tensor("float32", extraFeatures, [
-      1,
-      extraFeatureKeys.length,
-    ]);
-  }
-  const outputs = await state.gazeModel.session.run(feeds);
-  const gaze = outputs.gaze || outputs[state.gazeModel.session.outputNames[0]];
-  const rawX = Number(gaze.data[0]);
-  const rawY = Number(gaze.data[1]);
-  return {
-    tracking: true,
-    kind: state.gazeModel.key,
-    rawX,
-    rawY,
-    features: buildPersonalFeatureVector(featureFrame.payload, rawX, rawY),
-  };
-}
-
-function estimateHeuristicGaze(featureFrame) {
-  const { leftEye, rightEye, face, pose } = featureFrame;
-  const avgX = (leftEye.xRatio + rightEye.xRatio) / 2;
-  const avgY = (leftEye.yRatio + rightEye.yRatio) / 2;
-
-  let rawX = 0.5 + (avgX - 0.5) * 1.65 + (face.centerX - 0.5) * 0.52;
-  let rawY = 0.5 + (avgY - 0.5) * 1.35 + (face.centerY - 0.5) * 0.44;
-  if (pose) {
-    rawX += pose.yawDeg / 95;
-    rawY += pose.pitchDeg / 110;
-  }
-
-  return {
-    tracking: true,
-    kind: "heuristic",
-    rawX,
-    rawY,
-    features: buildPersonalFeatureVector(featureFrame.payload, rawX, rawY),
-  };
-}
-
-function computeEyeFeature(landmarks, cornerIndices, upperLidIndices, lowerLidIndices, irisPoints) {
-  const [firstCorner, secondCorner] = cornerIndices.map((index) => point(landmarks, index));
-  const [leftCorner, rightCorner] =
-    firstCorner[0] <= secondCorner[0] ? [firstCorner, secondCorner] : [secondCorner, firstCorner];
-  const irisCenter = meanPoint(landmarks, irisPoints);
-  const upperLid = meanPoint(landmarks, upperLidIndices);
-  const lowerLid = meanPoint(landmarks, lowerLidIndices);
-
-  const horizontalAxis = sub(rightCorner, leftCorner);
-  const eyeWidth = Math.max(norm(horizontalAxis), 1e-6);
-  const horizontalUnit = scale(horizontalAxis, 1 / eyeWidth);
-  let verticalUnit = [-horizontalUnit[1], horizontalUnit[0]];
-  if (dot(sub(lowerLid, upperLid), verticalUnit) < 0) {
-    verticalUnit = scale(verticalUnit, -1);
-  }
-
-  const verticalExtent = Math.max(dot(sub(lowerLid, upperLid), verticalUnit), 1e-6);
-  const eyeCenter = scale(add(add(leftCorner, rightCorner), add(upperLid, lowerLid)), 0.25);
-  const xProjection = dot(sub(irisCenter, leftCorner), horizontalUnit) / eyeWidth;
-  const yProjection = dot(sub(irisCenter, upperLid), verticalUnit) / verticalExtent;
-  const orthogonalOffset = dot(sub(irisCenter, eyeCenter), verticalUnit) / eyeWidth;
-  const upperGap = norm(sub(irisCenter, upperLid)) / eyeWidth;
-  const lowerGap = norm(sub(lowerLid, irisCenter)) / eyeWidth;
-
-  return {
-    xRatio: clamp01(xProjection),
-    yRatio: clamp01(yProjection),
-    orthY: orthogonalOffset,
-    upperGap,
-    lowerGap,
-    eyeOpenness: verticalExtent / eyeWidth,
-  };
-}
-
-function computeFaceFeature(landmarks) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const landmark of landmarks) {
-    minX = Math.min(minX, landmark.x);
-    maxX = Math.max(maxX, landmark.x);
-    minY = Math.min(minY, landmark.y);
-    maxY = Math.max(maxY, landmark.y);
-  }
-  const width = Math.max(maxX - minX, 1e-6);
-  const height = Math.max(maxY - minY, 1e-6);
-  return {
-    centerX: (minX + maxX) / 2,
-    centerY: (minY + maxY) / 2,
-    width,
-    height,
-    scale: (width + height) / 2,
-  };
-}
-
-function buildFeaturePayload(leftEye, rightEye, face, pose) {
-  const avgX = (leftEye.xRatio + rightEye.xRatio) / 2;
-  const avgY = (leftEye.yRatio + rightEye.yRatio) / 2;
-  const headYaw = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(pose?.yawDeg, HEAD_FEATURE_DEFAULTS.head_yaw_deg, BROWSER_HEAD_POSE_SIGNS.yaw)
-    : HEAD_FEATURE_DEFAULTS.head_yaw_deg;
-  const headPitch = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(
-        pose?.pitchDeg,
-        HEAD_FEATURE_DEFAULTS.head_pitch_deg,
-        BROWSER_HEAD_POSE_SIGNS.pitch,
-      )
-    : HEAD_FEATURE_DEFAULTS.head_pitch_deg;
-  const headRoll = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(pose?.rollDeg, HEAD_FEATURE_DEFAULTS.head_roll_deg, BROWSER_HEAD_POSE_SIGNS.roll)
-    : HEAD_FEATURE_DEFAULTS.head_roll_deg;
-  const headTx = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(pose?.tx, HEAD_FEATURE_DEFAULTS.head_tx, BROWSER_HEAD_POSE_SIGNS.tx)
-    : HEAD_FEATURE_DEFAULTS.head_tx;
-  const headTy = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(pose?.ty, HEAD_FEATURE_DEFAULTS.head_ty, BROWSER_HEAD_POSE_SIGNS.ty)
-    : HEAD_FEATURE_DEFAULTS.head_ty;
-  const headTz = USE_BROWSER_HEAD_POSE_FEATURES
-    ? signedPoseValue(pose?.tz, HEAD_FEATURE_DEFAULTS.head_tz, BROWSER_HEAD_POSE_SIGNS.tz)
-    : HEAD_FEATURE_DEFAULTS.head_tz;
-  return {
-    left_x: leftEye.xRatio,
-    left_y: leftEye.yRatio,
-    left_orth_y: leftEye.orthY,
-    left_openness: leftEye.eyeOpenness,
-    left_upper_gap: leftEye.upperGap,
-    left_lower_gap: leftEye.lowerGap,
-    right_x: rightEye.xRatio,
-    right_y: rightEye.yRatio,
-    right_orth_y: rightEye.orthY,
-    right_openness: rightEye.eyeOpenness,
-    right_upper_gap: rightEye.upperGap,
-    right_lower_gap: rightEye.lowerGap,
-    avg_x: avgX,
-    avg_y: avgY,
-    face_center_x: finiteOrDefault(face.centerX, HEAD_FEATURE_DEFAULTS.face_center_x),
-    face_center_y: finiteOrDefault(face.centerY, HEAD_FEATURE_DEFAULTS.face_center_y),
-    face_width: face.width,
-    face_height: face.height,
-    face_scale: finiteOrDefault(face.scale, HEAD_FEATURE_DEFAULTS.face_scale),
-    head_yaw_deg: headYaw,
-    head_pitch_deg: headPitch,
-    head_roll_deg: headRoll,
-    head_tx: headTx,
-    head_ty: headTy,
-    head_tz: headTz,
-  };
-}
-
-function firstMatrix(result) {
-  const matrix = result?.facialTransformationMatrixes?.[0] || result?.facialTransformationMatrices?.[0];
-  if (!matrix) {
-    return null;
-  }
-  if (Array.isArray(matrix)) {
-    return matrix.flat ? matrix.flat() : [].concat(...matrix);
-  }
-  if (matrix.data) {
-    return Array.from(matrix.data);
-  }
-  return null;
-}
-
-function computeHeadPose(matrix) {
-  if (!matrix || matrix.length < 12) {
-    return null;
-  }
-  const values = Array.from(matrix);
-  const r00 = values[0];
-  const r10 = values[4];
-  const r20 = values[8];
-  const r11 = values[5];
-  const r12 = values[6];
-  const r21 = values[9];
-  const r22 = values[10];
-  const sy = Math.sqrt(r00 * r00 + r10 * r10);
-  const singular = sy < 1e-6;
-  const pitch = singular ? Math.atan2(-r12, r11) : Math.atan2(r21, r22);
-  const yaw = Math.atan2(-r20, sy);
-  const roll = singular ? 0 : Math.atan2(r10, r00);
-  return {
-    pitchDeg: (pitch * 180) / Math.PI,
-    yawDeg: (yaw * 180) / Math.PI,
-    rollDeg: (roll * 180) / Math.PI,
-    tx: finiteOrDefault(values[3], HEAD_FEATURE_DEFAULTS.head_tx),
-    ty: finiteOrDefault(values[7], HEAD_FEATURE_DEFAULTS.head_ty),
-    tz: finiteOrDefault(values[11], HEAD_FEATURE_DEFAULTS.head_tz),
-  };
-}
-
-function extractEyeCropTensor(
-  landmarks,
-  cornerIndices,
-  upperLidIndices,
-  lowerLidIndices,
-  flipHorizontal,
-) {
-  const [firstCorner, secondCorner] = cornerIndices.map((index) => point(landmarks, index));
-  const [leftCorner, rightCorner] =
-    firstCorner[0] <= secondCorner[0] ? [firstCorner, secondCorner] : [secondCorner, firstCorner];
-  const upperLid = meanPoint(landmarks, upperLidIndices);
-  const lowerLid = meanPoint(landmarks, lowerLidIndices);
-
-  const horizontalAxis = sub(rightCorner, leftCorner);
-  const eyeWidth = Math.max(norm(horizontalAxis), 1e-6);
-  const horizontalUnit = scale(horizontalAxis, 1 / eyeWidth);
-  let verticalUnit = [-horizontalUnit[1], horizontalUnit[0]];
-  if (dot(sub(lowerLid, upperLid), verticalUnit) < 0) {
-    verticalUnit = scale(verticalUnit, -1);
-  }
-
-  const eyeHeight = Math.max(dot(sub(lowerLid, upperLid), verticalUnit), 1e-6);
-  const center = scale(add(add(leftCorner, rightCorner), add(upperLid, lowerLid)), 0.25);
-  const sourceWidth = state.processingCanvas.width;
-  const sourceHeight = state.processingCanvas.height;
-  const centerPx = [center[0] * sourceWidth, center[1] * sourceHeight];
-  const cropWidthPx = eyeWidth * sourceWidth * 1.8;
-  const cropHeightPx = Math.max(
-    eyeHeight * sourceHeight * 3.2,
-    cropWidthPx * (EYE_CROP_HEIGHT / EYE_CROP_WIDTH),
-  );
-  const xAxisPx = scale(horizontalUnit, cropWidthPx / 2);
-  const yAxisPx = scale(verticalUnit, cropHeightPx / 2);
-  const sourcePoints = [
-    sub(sub(centerPx, xAxisPx), yAxisPx),
-    sub(add(centerPx, xAxisPx), yAxisPx),
-    add(sub(centerPx, xAxisPx), yAxisPx),
-  ];
-
-  return affineCropToTensor(sourcePoints, flipHorizontal);
-}
-
-function affineCropToTensor(sourcePoints, flipHorizontal) {
-  const frame = state.processingFrameData || state.processingCanvas
-    .getContext("2d", { willReadFrequently: true })
-    .getImageData(0, 0, state.processingCanvas.width, state.processingCanvas.height);
-  const [s0, s1, s2] = sourcePoints;
-  const ax = (s1[0] - s0[0]) / (EYE_CROP_WIDTH - 1);
-  const ay = (s1[1] - s0[1]) / (EYE_CROP_WIDTH - 1);
-  const bx = (s2[0] - s0[0]) / (EYE_CROP_HEIGHT - 1);
-  const by = (s2[1] - s0[1]) / (EYE_CROP_HEIGHT - 1);
-  const tensor = new Float32Array(EYE_CROP_WIDTH * EYE_CROP_HEIGHT);
-  for (let y = 0; y < EYE_CROP_HEIGHT; y += 1) {
-    for (let x = 0; x < EYE_CROP_WIDTH; x += 1) {
-      const cropX = flipHorizontal ? EYE_CROP_WIDTH - 1 - x : x;
-      const sourceX = s0[0] + ax * cropX + bx * y;
-      const sourceY = s0[1] + ay * cropX + by * y;
-      const gray = sampleReplicatedGray(frame, sourceX, sourceY);
-      tensor[y * EYE_CROP_WIDTH + x] = gray / 127.5 - 1.0;
-    }
-  }
-  return tensor;
-}
-
-function sampleReplicatedGray(frame, x, y) {
-  const width = frame.width;
-  const height = frame.height;
-  const clampedX = Math.max(0, Math.min(width - 1, x));
-  const clampedY = Math.max(0, Math.min(height - 1, y));
-  const x0 = Math.floor(clampedX);
-  const y0 = Math.floor(clampedY);
-  const x1 = Math.min(x0 + 1, width - 1);
-  const y1 = Math.min(y0 + 1, height - 1);
-  const tx = clampedX - x0;
-  const ty = clampedY - y0;
-
-  const top = lerpGray(sampleGrayAt(frame, x0, y0), sampleGrayAt(frame, x1, y0), tx);
-  const bottom = lerpGray(sampleGrayAt(frame, x0, y1), sampleGrayAt(frame, x1, y1), tx);
-  return lerpGray(top, bottom, ty);
-}
-
-function sampleGrayAt(frame, x, y) {
-  const index = (y * frame.width + x) * 4;
-  const data = frame.data;
-  return data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-}
-
-function lerpGray(a, b, alpha) {
-  return a * (1 - alpha) + b * alpha;
-}
-
-function point(landmarks, index) {
-  const landmark = landmarks[index];
-  return [landmark.x, landmark.y];
-}
-
-function meanPoint(landmarks, indices) {
-  let x = 0;
-  let y = 0;
-  for (const index of indices) {
-    x += landmarks[index].x;
-    y += landmarks[index].y;
-  }
-  return [x / indices.length, y / indices.length];
-}
-
-function add(a, b) {
-  return [a[0] + b[0], a[1] + b[1]];
-}
-
-function sub(a, b) {
-  return [a[0] - b[0], a[1] - b[1]];
-}
-
-function scale(a, value) {
-  return [a[0] * value, a[1] * value];
-}
-
-function dot(a, b) {
-  return a[0] * b[0] + a[1] * b[1];
-}
-
-function norm(a) {
-  return Math.sqrt(dot(a, a));
+  renderStage({
+    canvas: elements.canvas,
+    context: ctx,
+    dpr: Math.max(window.devicePixelRatio || 1, 1),
+    now: performance.now(),
+    peers: state.peers.values(),
+    local: state.local,
+    calibrationActive: Boolean(state.calibrationSession?.active),
+    calibrationTarget: state.calibrationSession?.active
+      ? visibleOverlayTarget(CALIBRATION_TARGETS[state.calibrationSession.stepIndex], ".calibration-card")
+      : null,
+    trainerSession: state.trainerSession,
+    trainerTarget: state.trainerSession?.active
+      ? currentTrainerTarget(state.trainerSession, trainerTargetForOverlay)
+      : null,
+    waveScores: state.waveScores,
+    trainCaptureMs: TRAIN_CAPTURE_MS,
+    challengeDwellMs: CHALLENGE_DWELL_MS,
+    challengeTargetRadiusPx: CHALLENGE_TARGET_RADIUS_PX,
+  });
 }
 
 function averagePoint(samples) {
@@ -2015,368 +1349,21 @@ function averagePoint(samples) {
   return [sumX / Math.max(samples.length, 1), sumY / Math.max(samples.length, 1)];
 }
 
-function hasAnyCalibrationMapping() {
-  return Object.values(state.calibration.mappings || {}).some(Boolean);
-}
-
-function getCalibrationMapping(kind) {
-  return state.calibration.mappings?.[kind] || null;
-}
-
-function buildCalibrationMapping(kind, points) {
-  const normalizedPoints = CALIBRATION_TARGETS.map((target) => {
-    const point = points.find((item) => item.id === target.id);
-    if (!point) {
-      return null;
-    }
-    if (!Number.isFinite(point.rawX) || !Number.isFinite(point.rawY)) {
-      return null;
-    }
-    return {
-      id: target.id,
-      rawX: Number(point.rawX),
-      rawY: Number(point.rawY),
-      targetX: Number(point.targetX ?? target.x),
-      targetY: Number(point.targetY ?? target.y),
-    };
-  }).filter(Boolean);
-  if (normalizedPoints.length !== CALIBRATION_TARGETS.length) {
-    return null;
-  }
-
-  const affine = solveAffineTransform(normalizedPoints);
-  if (!affine) {
-    return null;
-  }
-
-  return {
-    kind,
-    version: CALIBRATION_VERSION,
-    points: normalizedPoints,
-    center: normalizedPoints.find((point) => point.id === "center") || null,
-    affine,
-  };
-}
-
-function normalizeCalibrationMapping(mapping, fallbackKind) {
-  if (!mapping || !Array.isArray(mapping.points)) {
-    return null;
-  }
-  if (mapping.version !== CALIBRATION_VERSION) {
-    return null;
-  }
-  return buildCalibrationMapping(mapping.kind || fallbackKind || "onnx", mapping.points);
-}
-
-function solveAffineTransform(points) {
-  const ata = [
-    [0, 0, 0],
-    [0, 0, 0],
-    [0, 0, 0],
-  ];
-  const atbx = [0, 0, 0];
-  const atby = [0, 0, 0];
-
-  for (const point of points) {
-    const row = [point.rawX, point.rawY, 1];
-    for (let r = 0; r < 3; r += 1) {
-      atbx[r] += row[r] * point.targetX;
-      atby[r] += row[r] * point.targetY;
-      for (let c = 0; c < 3; c += 1) {
-        ata[r][c] += row[r] * row[c];
-      }
-    }
-  }
-
-  const inverse = invert3x3(ata);
-  if (!inverse) {
-    return null;
-  }
-  return {
-    x: multiply3x3Vec(inverse, atbx),
-    y: multiply3x3Vec(inverse, atby),
-  };
-}
-
-function invert3x3(matrix) {
-  const [
-    [a, b, c],
-    [d, e, f],
-    [g, h, i],
-  ] = matrix;
-  const A = e * i - f * h;
-  const B = -(d * i - f * g);
-  const C = d * h - e * g;
-  const D = -(b * i - c * h);
-  const E = a * i - c * g;
-  const F = -(a * h - b * g);
-  const G = b * f - c * e;
-  const H = -(a * f - c * d);
-  const I = a * e - b * d;
-  const det = a * A + b * B + c * C;
-  if (Math.abs(det) < 1e-8) {
-    return null;
-  }
-  const invDet = 1 / det;
-  return [
-    [A * invDet, D * invDet, G * invDet],
-    [B * invDet, E * invDet, H * invDet],
-    [C * invDet, F * invDet, I * invDet],
-  ];
-}
-
-function multiply3x3Vec(matrix, vector) {
-  return matrix.map((row) => row[0] * vector[0] + row[1] * vector[1] + row[2] * vector[2]);
-}
-
-function mapPointWithCalibration(rawPoint, mapping) {
-  const piecewise = mapPointWithPiecewiseTriangles(rawPoint, mapping.points);
-  if (piecewise) {
-    return piecewise;
-  }
-  return applyAffineTransform(mapping.affine, rawPoint);
-}
-
-function mapPointWithPiecewiseTriangles(rawPoint, points) {
-  const triangles = [
-    ["topLeft", "topRight", "center"],
-    ["topRight", "bottomRight", "center"],
-    ["bottomRight", "bottomLeft", "center"],
-    ["bottomLeft", "topLeft", "center"],
-  ];
-  let best = null;
-
-  for (const ids of triangles) {
-    const source = ids.map((id) => findCalibrationPoint(points, id));
-    if (source.some((point) => !point)) {
-      continue;
-    }
-    const weights = barycentricWeights(
-      rawPoint,
-      [source[0].rawX, source[0].rawY],
-      [source[1].rawX, source[1].rawY],
-      [source[2].rawX, source[2].rawY],
-    );
-    if (!weights) {
-      continue;
-    }
-
-    const minWeight = Math.min(...weights);
-    if (minWeight >= CALIBRATION_INSIDE_TOLERANCE) {
-      return combineTrianglePoint(weights, source, "targetX", "targetY");
-    }
-    if (!best || minWeight > best.minWeight) {
-      best = { minWeight, weights, source };
-    }
-  }
-
-  if (!best) {
-    return null;
-  }
-  return combineTrianglePoint(best.weights, best.source, "targetX", "targetY");
-}
-
-function findCalibrationPoint(points, id) {
-  return points.find((point) => point.id === id) || null;
-}
-
-function barycentricWeights(point, a, b, c) {
-  const denominator =
-    (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
-  if (Math.abs(denominator) < 1e-8) {
-    return null;
-  }
-  const w1 =
-    ((b[1] - c[1]) * (point[0] - c[0]) + (c[0] - b[0]) * (point[1] - c[1])) /
-    denominator;
-  const w2 =
-    ((c[1] - a[1]) * (point[0] - c[0]) + (a[0] - c[0]) * (point[1] - c[1])) /
-    denominator;
-  const w3 = 1 - w1 - w2;
-  return [w1, w2, w3];
-}
-
-function combineTrianglePoint(weights, points, xKey, yKey) {
-  const x =
-    weights[0] * points[0][xKey] + weights[1] * points[1][xKey] + weights[2] * points[2][xKey];
-  const y =
-    weights[0] * points[0][yKey] + weights[1] * points[1][yKey] + weights[2] * points[2][yKey];
-  return [x, y];
-}
-
-function applyAffineTransform(affine, rawPoint) {
-  if (!affine?.x || !affine?.y) {
-    return null;
-  }
-  const vector = [rawPoint[0], rawPoint[1], 1];
-  return [
-    affine.x[0] * vector[0] + affine.x[1] * vector[1] + affine.x[2],
-    affine.y[0] * vector[0] + affine.y[1] * vector[1] + affine.y[2],
-  ];
-}
-
-function calibrationTargetLabel(id) {
-  switch (id) {
-    case "center":
-      return "center";
-    case "topLeft":
-      return "top-left";
-    case "topRight":
-      return "top-right";
-    case "bottomRight":
-      return "bottom-right";
-    case "bottomLeft":
-      return "bottom-left";
-    default:
-      return "target";
-  }
-}
-
-function defaultRelayUrl() {
-  if (location.protocol === "https:") {
-    return `wss://${location.host}/ws`;
-  }
-  if (location.protocol === "http:") {
-    return `ws://${location.host}/ws`;
-  }
-  return "ws://127.0.0.1:8765/ws";
-}
-
-function normalizeRelayUrl(value) {
-  const raw = (value || defaultRelayUrl()).trim();
-  if (raw.startsWith("https://")) {
-    return `wss://${raw.slice("https://".length)}`;
-  }
-  if (raw.startsWith("http://")) {
-    return `ws://${raw.slice("http://".length)}`;
-  }
-  if (raw.startsWith("ws://") || raw.startsWith("wss://")) {
-    return raw;
-  }
-  return `ws://${raw}`;
-}
-
-function normalizeRoom(value) {
-  const compact = (value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
-  if (!compact) {
-    return "";
-  }
-  if (compact.length === 6) {
-    return `${compact.slice(0, 3)}-${compact.slice(3)}`;
-  }
-  return compact;
-}
-
-function generateRoomCode() {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let prefix = "";
-  for (let index = 0; index < 3; index += 1) {
-    prefix += letters[Math.floor(Math.random() * letters.length)];
-  }
-  const suffix = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
-  return `${prefix}-${suffix}`;
-}
-
-function colorForName(name) {
-  let hash = 0;
-  for (let index = 0; index < name.length; index += 1) {
-    hash = (hash * 31 + name.charCodeAt(index)) >>> 0;
-  }
-  const hue = (hash % 360) / 360;
-  return hslToRgb(hue, 0.74, 0.62);
-}
-
-function hslToRgb(h, s, l) {
-  const hueToRgb = (p, q, t) => {
-    let value = t;
-    if (value < 0) value += 1;
-    if (value > 1) value -= 1;
-    if (value < 1 / 6) return p + (q - p) * 6 * value;
-    if (value < 1 / 2) return q;
-    if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
-    return p;
-  };
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [
-    Math.round(hueToRgb(p, q, h + 1 / 3) * 255),
-    Math.round(hueToRgb(p, q, h) * 255),
-    Math.round(hueToRgb(p, q, h - 1 / 3) * 255),
-  ];
-}
-
 function refreshPersonalModelLabel() {
   const kind = state.modelKey;
-  const sampleCount = samplesForKind(state.trainingSamples, kind).length;
-  const model = state.personalModels[kind];
-  const hasPersonalData = Boolean(model) || sampleCount > 0;
-  elements.evaluateButton.disabled = !model;
-  elements.challengeButton.disabled = !model;
-  elements.resetPersonalButton.disabled = !hasPersonalData;
-  const progress = clamp01(sampleCount / PERSONAL_MIN_SAMPLES);
-  elements.personalProgressFill.style.width = `${Math.round(progress * 100)}%`;
-  if (model) {
-    const fit = Number.isFinite(model.fitMeanPx) ? `fit ${Math.round(model.fitMeanPx)} px` : "trained";
-    const evalText = Number.isFinite(model.lastEvalMeanPx)
-      ? ` · test ${Math.round(model.lastEvalMeanPx)} px`
-      : "";
-    elements.personalModelLabel.textContent = `${model.sampleCount || sampleCount} samples · ${fit}${evalText}`;
-    if (Number.isFinite(model.lastEvalDeltaPx)) {
-      const direction = model.lastEvalDeltaPx >= 0 ? "better than base" : "worse than base";
-      elements.personalModelMeta.textContent = `${Math.abs(Math.round(model.lastEvalDeltaPx))} px ${direction}`;
-    } else {
-      elements.personalModelMeta.textContent = "Run Test for held-out accuracy";
-    }
-    elements.personalProgressFill.style.width = "100%";
-    return;
-  }
-  if (sampleCount > 0) {
-    elements.personalModelLabel.textContent = `${sampleCount}/${PERSONAL_MIN_SAMPLES} samples`;
-    elements.personalModelMeta.textContent = "Keep training";
-    return;
-  }
-  elements.personalModelLabel.textContent = "No data";
-  elements.personalModelMeta.textContent = "Local only";
-}
-
-function shuffledTargets(targets) {
-  const copy = targets.map((target) => ({ ...target }));
-  shuffleInPlace(copy, Math.random);
-  return copy;
-}
-
-function randomChallengeTarget(previous) {
-  let target = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    target = {
-      id: `challenge-${Date.now()}-${attempt}`,
-      x: 0.12 + Math.random() * 0.76,
-      y: 0.14 + Math.random() * 0.62,
-    };
-    if (!previous || Math.hypot(target.x - previous.x, target.y - previous.y) > 0.28) {
-      break;
-    }
-  }
-  return target;
-}
-
-function shuffleInPlace(items, random) {
-  for (let index = items.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
-  }
-  return items;
-}
-
-function distanceToTargetPx(point, target) {
-  return distancePx(
-    point.x,
-    point.y,
-    target.x,
-    target.y,
-    Math.max(1, window.innerWidth),
-    Math.max(1, window.innerHeight),
-  );
+  const view = personalModelView({
+    kind,
+    trainingSamples: state.trainingSamples,
+    personalStats: state.personalStats,
+    personalModels: state.personalModels,
+    isDojo: state.sessionMode === "dojo",
+  });
+  elements.challengeButton.disabled = view.challengeDisabled;
+  elements.multiplayerButton.disabled = view.multiplayerDisabled;
+  elements.resetPersonalButton.disabled = view.resetDisabled;
+  elements.personalProgressFill.style.width = `${view.progressPercent}%`;
+  elements.personalModelLabel.textContent = view.label;
+  elements.personalModelMeta.textContent = view.meta;
 }
 
 function visibleOverlayTarget(target, dockSelector) {
@@ -2398,87 +1385,256 @@ function nextFrame() {
   return new Promise((resolve) => window.requestAnimationFrame(resolve));
 }
 
+function loadDebugEnabled() {
+  const debugParam = new URLSearchParams(location.search).get("debug");
+  if (debugParam === "1" || debugParam === "true") {
+    return true;
+  }
+  if (debugParam === "0" || debugParam === "false") {
+    return false;
+  }
+  return localStorage.getItem("gazeGame.debug") === "1";
+}
+
 function loadControlsHidden() {
   return localStorage.getItem("gazeGame.controlsHidden") === "1";
 }
 
-function defaultCalibration() {
-  return {
-    version: CALIBRATION_VERSION,
-    centerX: 0.5,
-    centerY: 0.5,
-    gainX: 1.85,
-    gainY: 1.75,
-    mappings: {},
-  };
+function setDebugVisible(visible, persist = true) {
+  state.debug.enabled = Boolean(visible);
+  elements.debugPanel.classList.toggle("hidden", !state.debug.enabled);
+  elements.debugButton.setAttribute("aria-expanded", String(state.debug.enabled));
+  elements.debugButton.setAttribute("aria-pressed", String(state.debug.enabled));
+  if (persist) {
+    localStorage.setItem("gazeGame.debug", state.debug.enabled ? "1" : "0");
+  }
+  refreshDebugPanel(true);
 }
 
-function loadCalibration() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("gazeGame.calibration") || "{}");
-    const calibration = defaultCalibration();
-    if (saved.version !== CALIBRATION_VERSION) {
-      return calibration;
-    }
-    calibration.centerX = typeof saved.centerX === "number" ? saved.centerX : calibration.centerX;
-    calibration.centerY = typeof saved.centerY === "number" ? saved.centerY : calibration.centerY;
-    calibration.gainX = typeof saved.gainX === "number" ? saved.gainX : calibration.gainX;
-    calibration.gainY = typeof saved.gainY === "number" ? saved.gainY : calibration.gainY;
-
-    if (saved.mappings && typeof saved.mappings === "object") {
-      for (const [kind, mapping] of Object.entries(saved.mappings)) {
-        const normalized = normalizeCalibrationMapping(mapping, kind);
-        if (normalized) {
-          calibration.mappings[kind] = normalized;
-        }
-      }
-    } else if (Array.isArray(saved.points)) {
-      const normalized = normalizeCalibrationMapping(saved, saved.kind || "onnx");
-      if (normalized) {
-        calibration.mappings[normalized.kind] = normalized;
-      }
-    }
-    return calibration;
-  } catch {
-    return defaultCalibration();
+function recordInferenceDebug(durationMs) {
+  const debug = state.debug;
+  const now = performance.now();
+  debug.inferenceCount += 1;
+  debug.frameCount += 1;
+  debug.lastInferenceMs = durationMs;
+  debug.avgInferenceMs =
+    debug.avgInferenceMs > 0 ? debug.avgInferenceMs * 0.86 + durationMs * 0.14 : durationMs;
+  const windowMs = now - debug.fpsStartedAt;
+  if (windowMs >= 1000) {
+    debug.fps = (debug.frameCount * 1000) / windowMs;
+    debug.frameCount = 0;
+    debug.fpsStartedAt = now;
   }
 }
 
-function saveCalibration(calibration) {
-  localStorage.setItem("gazeGame.calibration", JSON.stringify(calibration));
+function recordInferenceFailureDebug(error) {
+  state.debug.inferenceFailures += 1;
+  state.debug.lastError = error instanceof Error ? error.message : String(error || "unknown");
+  recordDebugSample({
+    event: "error",
+    message: state.debug.lastError,
+  });
+}
+
+function recordDebugSample(sample) {
+  state.debug.samples.push({
+    ts: new Date().toISOString(),
+    ...sample,
+  });
+  if (state.debug.samples.length > DEBUG_SAMPLE_LIMIT) {
+    state.debug.samples.splice(0, state.debug.samples.length - DEBUG_SAMPLE_LIMIT);
+  }
+}
+
+function refreshDebugPanel(force = false) {
+  if (!state.debug.enabled) {
+    return;
+  }
+  const now = performance.now();
+  if (!force && now - state.debug.lastDebugRefreshAt < DEBUG_REFRESH_MS) {
+    return;
+  }
+  state.debug.lastDebugRefreshAt = now;
+  const rows = debugMetricRows();
+  const fragment = document.createDocumentFragment();
+  for (const [label, value] of rows) {
+    const term = document.createElement("dt");
+    const details = document.createElement("dd");
+    term.textContent = label;
+    details.textContent = value;
+    fragment.append(term, details);
+  }
+  elements.debugMetrics.replaceChildren(fragment);
+}
+
+function debugMetricRows() {
+  const prediction = state.debug.lastPrediction || {};
+  const rawPoint =
+    prediction.rawX == null || prediction.rawY == null
+      ? "n/a"
+      : `${formatNumber(prediction.rawX)}, ${formatNumber(prediction.rawY)}`;
+  const cursorPoint = `${formatNumber(state.local.x)}, ${formatNumber(state.local.y)}`;
+  const calibration = getCalibrationMapping(state.calibration, prediction.kind || state.modelKey);
+  const samples = samplesForKind(state.trainingSamples, state.modelKey).length;
+  return [
+    ["Status", elements.trackingLabel.textContent || "Ready"],
+    ["Session", `${state.sessionMode}/${state.source}`],
+    ["Relay", state.connected ? "connected" : "local"],
+    ["Peers", String(state.peers.size)],
+    ["Model", `${modelConfig(state.modelKey).label}${state.gazeModel ? "" : " fallback"}`],
+    ["Reading", prediction.kind || "none"],
+    ["Method", prediction.method || "none"],
+    ["Tracking", state.local.tracking ? "yes" : "no"],
+    ["Cursor", cursorPoint],
+    ["Raw", rawPoint],
+    ["FPS", formatNumber(state.debug.fps)],
+    ["Infer ms", formatNumber(state.debug.lastInferenceMs)],
+    ["Avg ms", formatNumber(state.debug.avgInferenceMs)],
+    ["Failures", String(state.debug.inferenceFailures)],
+    ["Video", `${elements.video.videoWidth || 0}x${elements.video.videoHeight || 0}`],
+    ["Calib", calibration ? "saved" : "none"],
+    ["Samples", String(samples)],
+    ["Personal", state.personalModels[state.modelKey] ? "trained" : "none"],
+    ["Last err", state.debug.lastError || "none"],
+  ];
+}
+
+async function exportDebugLog() {
+  const report = buildDebugReport();
+  const text = JSON.stringify(report, null, 2);
+  downloadTextFile(text, `gaze-ninja-debug-${Date.now()}.json`);
+  try {
+    await navigator.clipboard?.writeText(text);
+    showToast("Debug log downloaded and copied.");
+  } catch {
+    showToast("Debug log downloaded.");
+  }
+  window.setTimeout(hideToast, 1600);
+}
+
+function buildDebugReport() {
+  const prediction = state.debug.lastPrediction || {};
+  const calibration = getCalibrationMapping(state.calibration, prediction.kind || state.modelKey);
+  const relay = summarizeRelayUrl(elements.relayInput.value);
+  return {
+    generatedAt: new Date().toISOString(),
+    app: {
+      name: "Gaze Ninja",
+      url: `${location.origin}${location.pathname}`,
+      secureContext: window.isSecureContext,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+      },
+      userAgent: navigator.userAgent,
+    },
+    runtime: {
+      source: state.source,
+      sessionMode: state.sessionMode,
+      connected: state.connected,
+      relay,
+      roomCodePresent: Boolean(state.local.room),
+      roomCodeLength: state.local.room.length,
+      peerCount: state.peers.size,
+      runtimeAssets: "local vendor",
+    },
+    video: {
+      width: elements.video.videoWidth || 0,
+      height: elements.video.videoHeight || 0,
+      readyState: elements.video.readyState,
+      tracks: state.mediaStream
+        ? state.mediaStream.getVideoTracks().map((track) => ({
+            label: track.label,
+            readyState: track.readyState,
+            enabled: track.enabled,
+            settings: safeTrackSettings(track),
+          }))
+        : [],
+    },
+    model: {
+      selectedKey: state.modelKey,
+      selectedLabel: modelConfig(state.modelKey).label,
+      loaded: Boolean(state.gazeModel),
+      activeReadingKind: prediction.kind || null,
+      status: elements.trackingLabel.textContent || "",
+      calibrationSaved: Boolean(calibration),
+      personalTrained: Boolean(state.personalModels[state.modelKey]),
+      retainedSamples: samplesForKind(state.trainingSamples, state.modelKey).length,
+      totalSamples:
+        personalStatsForKind(state.personalStats, state.modelKey, state.trainingSamples)
+          .totalSamples || 0,
+    },
+    cursor: {
+      tracking: state.local.tracking,
+      method: prediction.method || "none",
+      x: state.local.x,
+      y: state.local.y,
+      rawX: prediction.rawX ?? null,
+      rawY: prediction.rawY ?? null,
+    },
+    metrics: {
+      fps: state.debug.fps,
+      lastInferenceMs: state.debug.lastInferenceMs,
+      avgInferenceMs: state.debug.avgInferenceMs,
+      inferenceCount: state.debug.inferenceCount,
+      inferenceFailures: state.debug.inferenceFailures,
+      lastError: state.debug.lastError,
+    },
+    recentSamples: state.debug.samples.slice(-DEBUG_SAMPLE_LIMIT),
+  };
+}
+
+function downloadTextFile(text, filename) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function summarizeRelayUrl(value) {
+  try {
+    const url = new URL(normalizeRelayUrl(value));
+    return {
+      protocol: url.protocol,
+      host: url.host,
+      pathname: url.pathname,
+    };
+  } catch {
+    return { host: "invalid" };
+  }
+}
+
+function safeTrackSettings(track) {
+  try {
+    const settings = track.getSettings();
+    return {
+      width: settings.width,
+      height: settings.height,
+      frameRate: settings.frameRate,
+      facingMode: settings.facingMode,
+      deviceIdPresent: Boolean(settings.deviceId),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "0.00";
+  }
+  return number.toFixed(2);
 }
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
-}
-
-function finiteOrDefault(value, fallback) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function featureValue(payload, key, fallback) {
-  return finiteOrDefault(payload?.[key], fallback);
-}
-
-function signedPoseValue(value, fallback, sign) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) {
-    return fallback;
-  }
-  return number * sign;
-}
-
-function normalizeModelKey(value) {
-  return GAZE_MODELS[value] ? value : DEFAULT_GAZE_MODEL_KEY;
-}
-
-function modelConfig(modelKey) {
-  return GAZE_MODELS[normalizeModelKey(modelKey)];
-}
-
-function isModelReading(kind) {
-  return Boolean(GAZE_MODELS[kind]);
 }
 
 function lerp(a, b, alpha) {

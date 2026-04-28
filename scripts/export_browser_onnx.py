@@ -11,11 +11,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from shared_gaze.config import DEFAULT_CHECKPOINT_PATH, EYE_CROP_HEIGHT, EYE_CROP_WIDTH
+from scripts.browser_model_manifest import (
+    browser_model_spec,
+    selected_browser_model_specs,
+)
+from shared_gaze.config import EYE_CROP_HEIGHT, EYE_CROP_WIDTH
 from shared_gaze.vision_runtime import load_vision_predictor
 
 
-DEFAULT_OUTPUT_PATH = Path("web/models/vision_gaze_spatial_geom.onnx")
+DEFAULT_OUTPUT_PATH = browser_model_spec("spatial_geom").output
 
 
 class BrowserGazeModel(nn.Module):
@@ -98,15 +102,28 @@ def export_browser_onnx(checkpoint_path: Path, output_path: Path, opset: int) ->
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export the gaze checkpoint for browser ONNX.")
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT_PATH)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    parser.add_argument(
+        "--model",
+        choices=[spec.key for spec in selected_browser_model_specs(None, True)],
+        help="Export one configured browser model. Defaults to all models.",
+    )
+    parser.add_argument("--all", action="store_true", help="Export all configured browser models.")
+    parser.add_argument("--checkpoint", type=Path, help="Override checkpoint path for single-model export.")
+    parser.add_argument("--output", type=Path, help="Override output path for single-model export.")
     parser.add_argument("--opset", type=int, default=17)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    export_browser_onnx(args.checkpoint, args.output, args.opset)
+    specs = selected_browser_model_specs(args.model, args.all or args.model is None)
+    if (args.checkpoint or args.output) and len(specs) != 1:
+        raise SystemExit("--checkpoint and --output can only be used with --model")
+    for spec in specs:
+        checkpoint_path = args.checkpoint.expanduser().resolve() if args.checkpoint else spec.resolve_checkpoint()
+        output_path = args.output.expanduser().resolve() if args.output else spec.output
+        print(f"Exporting {spec.key}: {checkpoint_path} -> {output_path}")
+        export_browser_onnx(checkpoint_path, output_path, args.opset)
 
 
 if __name__ == "__main__":
