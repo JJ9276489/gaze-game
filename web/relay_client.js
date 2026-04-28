@@ -66,14 +66,17 @@ export function buildWaveStartMessage({
   targets,
   timestamp = Date.now(),
 }) {
-  return {
+  const message = {
     type: "wave_start",
     room,
     seed,
     duration_ms: durationMs,
-    targets,
     ts: timestamp,
   };
+  if (Array.isArray(targets)) {
+    message.targets = targets;
+  }
+  return message;
 }
 
 export function buildWaveHitMessage({ room, waveId, targetId, score, timestamp = Date.now() }) {

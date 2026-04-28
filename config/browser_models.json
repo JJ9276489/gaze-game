@@ -1,0 +1,18 @@
+{
+  "models": [
+    {
+      "key": "spatial_geom",
+      "label": "Spatial geom",
+      "checkpoint": "models/vision_gaze_spatial_geom.pt",
+      "fallback_checkpoint": "../eye-cursor/models/vision_gaze_spatial_geom.pt",
+      "output": "web/models/vision_gaze_spatial_geom.onnx"
+    },
+    {
+      "key": "latest",
+      "label": "Concat latest",
+      "checkpoint": "models/vision_gaze_latest.pt",
+      "fallback_checkpoint": "../eye-cursor/models/vision_gaze_latest.pt",
+      "output": "web/models/vision_gaze_latest.onnx"
+    }
+  ]
+}

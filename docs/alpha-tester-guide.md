@@ -38,11 +38,18 @@ webcam data, training samples, or personal model.
 
 - `Full screen` enters or exits fullscreen.
 - `Hide buttons` removes most controls while keeping the room code visible.
+- `Debug` shows model, cursor, camera, and latency metrics.
+- `Export log` downloads a JSON report you can send to the organizer.
 - Press `F` to toggle fullscreen.
 - Press `H` to hide or show controls.
+- Press `D` to show or hide debug metrics.
 
 During calibration, training, testing, and competition, the app keeps the screen minimal
 so the UI does not block targets.
+
+The debug export does not include webcam frames, eye crops, face landmarks, or the actual
+room code. It includes browser/device status, model status, cursor coordinates, timing,
+and recent gaze samples.
 
 ## Troubleshooting
 

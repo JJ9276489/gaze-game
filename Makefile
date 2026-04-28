@@ -1,6 +1,6 @@
 PYTHON ?= .venv/bin/python
 
-.PHONY: check check-js check-python test test-js test-python
+.PHONY: check check-js check-python test test-js test-python vendor-browser-runtime export-browser-models verify-browser-models
 
 check: check-js check-python test
 
@@ -25,3 +25,12 @@ test-js:
 
 test-python:
 	$(PYTHON) -m unittest discover -s tests
+
+vendor-browser-runtime:
+	$(PYTHON) scripts/vendor_browser_runtime.py
+
+export-browser-models:
+	$(PYTHON) scripts/export_browser_onnx.py
+
+verify-browser-models:
+	$(PYTHON) scripts/verify_browser_onnx.py

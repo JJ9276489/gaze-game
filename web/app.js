@@ -15,11 +15,9 @@ import {
 } from "./personal_model.js";
 import {
   CHALLENGE_DURATION_MS,
-  WAVE_TARGET_COUNT,
   createWaveSeed,
   isMultiplayerWaveMode,
   isWaveMode,
-  makeEnemyTargets,
   normalizeRelayWave,
 } from "./game_logic.js";
 import {
@@ -79,6 +77,8 @@ import {
 const CALIBRATION_SETTLE_MS = 600;
 const CALIBRATION_CAPTURE_MS = 900;
 const CALIBRATION_MIN_SAMPLES = 10;
+const DEBUG_REFRESH_MS = 250;
+const DEBUG_SAMPLE_LIMIT = 180;
 
 const $ = (id) => document.getElementById(id);
 
@@ -109,6 +109,10 @@ const elements = {
   copyRoomButton: $("copyRoomButton"),
   fullscreenButton: $("fullscreenButton"),
   toggleControlsButton: $("toggleControlsButton"),
+  debugButton: $("debugButton"),
+  exportDebugButton: $("exportDebugButton"),
+  debugPanel: $("debugPanel"),
+  debugMetrics: $("debugMetrics"),
   nameLabel: $("nameLabel"),
   trackingLabel: $("trackingLabel"),
   modelSelect: $("modelSelect"),
@@ -167,6 +171,20 @@ const state = {
   waveScores: new Map(),
   pendingWave: null,
   controlsHidden: loadControlsHidden(),
+  debug: {
+    enabled: loadDebugEnabled(),
+    frameCount: 0,
+    fpsStartedAt: performance.now(),
+    fps: 0,
+    inferenceCount: 0,
+    inferenceFailures: 0,
+    lastInferenceMs: 0,
+    avgInferenceMs: 0,
+    lastDebugRefreshAt: 0,
+    lastError: "",
+    lastPrediction: null,
+    samples: [],
+  },
   processingCanvas: document.createElement("canvas"),
 };
 
@@ -186,6 +204,7 @@ function init() {
   );
   elements.modelSelect.value = state.modelKey;
   setControlsHidden(state.controlsHidden, false);
+  setDebugVisible(state.debug.enabled, false);
   refreshFullscreenButton();
   refreshPersonalModelLabel();
 
@@ -212,6 +231,12 @@ function init() {
   });
   elements.toggleControlsButton.addEventListener("click", () => {
     setControlsHidden(!state.controlsHidden);
+  });
+  elements.debugButton.addEventListener("click", () => {
+    setDebugVisible(!state.debug.enabled);
+  });
+  elements.exportDebugButton.addEventListener("click", () => {
+    void exportDebugLog();
   });
   elements.trainButton.addEventListener("click", () => {
     void startTrainerRun("dojo");
@@ -426,6 +451,9 @@ function handleGlobalKeydown(event) {
   } else if (key === "f") {
     event.preventDefault();
     void toggleFullscreen();
+  } else if (key === "d") {
+    event.preventDefault();
+    setDebugVisible(!state.debug.enabled);
   }
 }
 
@@ -553,6 +581,7 @@ function readGazeFrame() {
       .then((reading) => applyGazeReading(reading))
       .catch((error) => {
         console.warn("Gaze frame failed", error);
+        recordInferenceFailureDebug(error);
         state.local.tracking = false;
         setTrackingStatus("Camera paused");
       })
@@ -565,21 +594,35 @@ function readGazeFrame() {
 }
 
 async function processGazeFrame() {
+  const startedAt = performance.now();
   const frame = drawMirroredVideoFrame(elements.video, state.processingCanvas);
   const result = state.faceLandmarker.detectForVideo(state.processingCanvas, performance.now());
-  return estimateGaze(result, {
+  const reading = await estimateGaze(result, {
     gazeModel: state.gazeModel,
     frame,
     onModelError(error) {
       console.warn("ONNX gaze inference failed; using fallback.", error);
+      recordInferenceFailureDebug(error);
     },
   });
+  recordInferenceDebug(performance.now() - startedAt);
+  return reading;
 }
 
 function applyGazeReading(reading) {
   if (!reading?.tracking) {
     state.local.tracking = false;
     state.rawReading = null;
+    state.debug.lastPrediction = {
+      tracking: false,
+      method: "none",
+      rawX: null,
+      rawY: null,
+      x: state.local.x,
+      y: state.local.y,
+      kind: state.modelKey,
+    };
+    recordDebugSample({ event: "gaze", tracking: false, method: "none" });
     setTrackingStatus("No face");
     if (state.calibrationSession?.active) {
       elements.calibrationBody.textContent = "Face lost. Look back at the camera, then keep staring at the dot.";
@@ -599,6 +642,25 @@ function applyGazeReading(reading) {
   state.local.x = state.local.tracking ? lerp(state.local.x, nextX, alpha) : nextX;
   state.local.y = state.local.tracking ? lerp(state.local.y, nextY, alpha) : nextY;
   state.local.tracking = true;
+  state.debug.lastPrediction = {
+    tracking: true,
+    method: predicted.method,
+    rawX: reading.rawX,
+    rawY: reading.rawY,
+    x: state.local.x,
+    y: state.local.y,
+    kind: reading.kind,
+  };
+  recordDebugSample({
+    event: "gaze",
+    tracking: true,
+    kind: reading.kind,
+    method: predicted.method,
+    rawX: reading.rawX,
+    rawY: reading.rawY,
+    x: state.local.x,
+    y: state.local.y,
+  });
   updateTrainerRun(reading, {
     active: {
       x: state.local.x,
@@ -856,7 +918,6 @@ async function requestMultiplayerWaveFromUser() {
       room: state.local.room,
       seed,
       durationMs: CHALLENGE_DURATION_MS,
-      targets: makeEnemyTargets(seed, WAVE_TARGET_COUNT),
     }),
   );
 }
@@ -1059,6 +1120,22 @@ function updateMouseSource(event) {
   state.local.x = clamp01(event.clientX / Math.max(window.innerWidth, 1));
   state.local.y = clamp01(event.clientY / Math.max(window.innerHeight, 1));
   state.local.tracking = true;
+  state.debug.lastPrediction = {
+    tracking: true,
+    method: "mouse",
+    rawX: null,
+    rawY: null,
+    x: state.local.x,
+    y: state.local.y,
+    kind: "mouse",
+  };
+  recordDebugSample({
+    event: "mouse",
+    tracking: true,
+    method: "mouse",
+    x: state.local.x,
+    y: state.local.y,
+  });
 }
 
 function connectRelay() {
@@ -1235,6 +1312,7 @@ function sendCursor() {
 
 function drawLoop() {
   drawStage();
+  refreshDebugPanel();
   state.animationFrame = window.requestAnimationFrame(drawLoop);
 }
 
@@ -1307,8 +1385,252 @@ function nextFrame() {
   return new Promise((resolve) => window.requestAnimationFrame(resolve));
 }
 
+function loadDebugEnabled() {
+  const debugParam = new URLSearchParams(location.search).get("debug");
+  if (debugParam === "1" || debugParam === "true") {
+    return true;
+  }
+  if (debugParam === "0" || debugParam === "false") {
+    return false;
+  }
+  return localStorage.getItem("gazeGame.debug") === "1";
+}
+
 function loadControlsHidden() {
   return localStorage.getItem("gazeGame.controlsHidden") === "1";
+}
+
+function setDebugVisible(visible, persist = true) {
+  state.debug.enabled = Boolean(visible);
+  elements.debugPanel.classList.toggle("hidden", !state.debug.enabled);
+  elements.debugButton.setAttribute("aria-expanded", String(state.debug.enabled));
+  elements.debugButton.setAttribute("aria-pressed", String(state.debug.enabled));
+  if (persist) {
+    localStorage.setItem("gazeGame.debug", state.debug.enabled ? "1" : "0");
+  }
+  refreshDebugPanel(true);
+}
+
+function recordInferenceDebug(durationMs) {
+  const debug = state.debug;
+  const now = performance.now();
+  debug.inferenceCount += 1;
+  debug.frameCount += 1;
+  debug.lastInferenceMs = durationMs;
+  debug.avgInferenceMs =
+    debug.avgInferenceMs > 0 ? debug.avgInferenceMs * 0.86 + durationMs * 0.14 : durationMs;
+  const windowMs = now - debug.fpsStartedAt;
+  if (windowMs >= 1000) {
+    debug.fps = (debug.frameCount * 1000) / windowMs;
+    debug.frameCount = 0;
+    debug.fpsStartedAt = now;
+  }
+}
+
+function recordInferenceFailureDebug(error) {
+  state.debug.inferenceFailures += 1;
+  state.debug.lastError = error instanceof Error ? error.message : String(error || "unknown");
+  recordDebugSample({
+    event: "error",
+    message: state.debug.lastError,
+  });
+}
+
+function recordDebugSample(sample) {
+  state.debug.samples.push({
+    ts: new Date().toISOString(),
+    ...sample,
+  });
+  if (state.debug.samples.length > DEBUG_SAMPLE_LIMIT) {
+    state.debug.samples.splice(0, state.debug.samples.length - DEBUG_SAMPLE_LIMIT);
+  }
+}
+
+function refreshDebugPanel(force = false) {
+  if (!state.debug.enabled) {
+    return;
+  }
+  const now = performance.now();
+  if (!force && now - state.debug.lastDebugRefreshAt < DEBUG_REFRESH_MS) {
+    return;
+  }
+  state.debug.lastDebugRefreshAt = now;
+  const rows = debugMetricRows();
+  const fragment = document.createDocumentFragment();
+  for (const [label, value] of rows) {
+    const term = document.createElement("dt");
+    const details = document.createElement("dd");
+    term.textContent = label;
+    details.textContent = value;
+    fragment.append(term, details);
+  }
+  elements.debugMetrics.replaceChildren(fragment);
+}
+
+function debugMetricRows() {
+  const prediction = state.debug.lastPrediction || {};
+  const rawPoint =
+    prediction.rawX == null || prediction.rawY == null
+      ? "n/a"
+      : `${formatNumber(prediction.rawX)}, ${formatNumber(prediction.rawY)}`;
+  const cursorPoint = `${formatNumber(state.local.x)}, ${formatNumber(state.local.y)}`;
+  const calibration = getCalibrationMapping(state.calibration, prediction.kind || state.modelKey);
+  const samples = samplesForKind(state.trainingSamples, state.modelKey).length;
+  return [
+    ["Status", elements.trackingLabel.textContent || "Ready"],
+    ["Session", `${state.sessionMode}/${state.source}`],
+    ["Relay", state.connected ? "connected" : "local"],
+    ["Peers", String(state.peers.size)],
+    ["Model", `${modelConfig(state.modelKey).label}${state.gazeModel ? "" : " fallback"}`],
+    ["Reading", prediction.kind || "none"],
+    ["Method", prediction.method || "none"],
+    ["Tracking", state.local.tracking ? "yes" : "no"],
+    ["Cursor", cursorPoint],
+    ["Raw", rawPoint],
+    ["FPS", formatNumber(state.debug.fps)],
+    ["Infer ms", formatNumber(state.debug.lastInferenceMs)],
+    ["Avg ms", formatNumber(state.debug.avgInferenceMs)],
+    ["Failures", String(state.debug.inferenceFailures)],
+    ["Video", `${elements.video.videoWidth || 0}x${elements.video.videoHeight || 0}`],
+    ["Calib", calibration ? "saved" : "none"],
+    ["Samples", String(samples)],
+    ["Personal", state.personalModels[state.modelKey] ? "trained" : "none"],
+    ["Last err", state.debug.lastError || "none"],
+  ];
+}
+
+async function exportDebugLog() {
+  const report = buildDebugReport();
+  const text = JSON.stringify(report, null, 2);
+  downloadTextFile(text, `gaze-ninja-debug-${Date.now()}.json`);
+  try {
+    await navigator.clipboard?.writeText(text);
+    showToast("Debug log downloaded and copied.");
+  } catch {
+    showToast("Debug log downloaded.");
+  }
+  window.setTimeout(hideToast, 1600);
+}
+
+function buildDebugReport() {
+  const prediction = state.debug.lastPrediction || {};
+  const calibration = getCalibrationMapping(state.calibration, prediction.kind || state.modelKey);
+  const relay = summarizeRelayUrl(elements.relayInput.value);
+  return {
+    generatedAt: new Date().toISOString(),
+    app: {
+      name: "Gaze Ninja",
+      url: `${location.origin}${location.pathname}`,
+      secureContext: window.isSecureContext,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        dpr: window.devicePixelRatio || 1,
+      },
+      userAgent: navigator.userAgent,
+    },
+    runtime: {
+      source: state.source,
+      sessionMode: state.sessionMode,
+      connected: state.connected,
+      relay,
+      roomCodePresent: Boolean(state.local.room),
+      roomCodeLength: state.local.room.length,
+      peerCount: state.peers.size,
+      runtimeAssets: "local vendor",
+    },
+    video: {
+      width: elements.video.videoWidth || 0,
+      height: elements.video.videoHeight || 0,
+      readyState: elements.video.readyState,
+      tracks: state.mediaStream
+        ? state.mediaStream.getVideoTracks().map((track) => ({
+            label: track.label,
+            readyState: track.readyState,
+            enabled: track.enabled,
+            settings: safeTrackSettings(track),
+          }))
+        : [],
+    },
+    model: {
+      selectedKey: state.modelKey,
+      selectedLabel: modelConfig(state.modelKey).label,
+      loaded: Boolean(state.gazeModel),
+      activeReadingKind: prediction.kind || null,
+      status: elements.trackingLabel.textContent || "",
+      calibrationSaved: Boolean(calibration),
+      personalTrained: Boolean(state.personalModels[state.modelKey]),
+      retainedSamples: samplesForKind(state.trainingSamples, state.modelKey).length,
+      totalSamples:
+        personalStatsForKind(state.personalStats, state.modelKey, state.trainingSamples)
+          .totalSamples || 0,
+    },
+    cursor: {
+      tracking: state.local.tracking,
+      method: prediction.method || "none",
+      x: state.local.x,
+      y: state.local.y,
+      rawX: prediction.rawX ?? null,
+      rawY: prediction.rawY ?? null,
+    },
+    metrics: {
+      fps: state.debug.fps,
+      lastInferenceMs: state.debug.lastInferenceMs,
+      avgInferenceMs: state.debug.avgInferenceMs,
+      inferenceCount: state.debug.inferenceCount,
+      inferenceFailures: state.debug.inferenceFailures,
+      lastError: state.debug.lastError,
+    },
+    recentSamples: state.debug.samples.slice(-DEBUG_SAMPLE_LIMIT),
+  };
+}
+
+function downloadTextFile(text, filename) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function summarizeRelayUrl(value) {
+  try {
+    const url = new URL(normalizeRelayUrl(value));
+    return {
+      protocol: url.protocol,
+      host: url.host,
+      pathname: url.pathname,
+    };
+  } catch {
+    return { host: "invalid" };
+  }
+}
+
+function safeTrackSettings(track) {
+  try {
+    const settings = track.getSettings();
+    return {
+      width: settings.width,
+      height: settings.height,
+      frameRate: settings.frameRate,
+      facingMode: settings.facingMode,
+      deviceIdPresent: Boolean(settings.deviceId),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "0.00";
+  }
+  return number.toFixed(2);
 }
 
 function clamp01(value) {

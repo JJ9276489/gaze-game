@@ -12,3 +12,4 @@ models/*.json
 web/models/*.onnx
 web/models/*.pt
 web/models/*.json
+web/vendor/

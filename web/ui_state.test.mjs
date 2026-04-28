@@ -19,15 +19,15 @@ test("normalizers keep player names and room codes browser friendly", () => {
 
   assert.equal(normalizeRoom("abc123"), "ABC-123");
   assert.equal(normalizeRoom("abc-123!!!"), "ABC-123");
-  assert.equal(normalizeRoom("room with spaces"), "ROOMWITHSPAC");
+  assert.equal(normalizeRoom("abcd-1234-wxyz"), "ABCD-1234-WXYZ");
+  assert.equal(normalizeRoom("room with spaces"), "ROOM-WITH-SPAC");
   assert.equal(normalizeRoom(""), "");
 });
 
 test("room code and player color generation are deterministic when seeded", () => {
-  const values = [0, 0.08, 0.1, 0.321];
-  const code = generateRoomCode(() => values.shift() ?? 0);
+  const code = generateRoomCode(() => 0);
 
-  assert.equal(code, "ABC-321");
+  assert.equal(code, "AAAA-AAAA-AAAA");
   assert.deepEqual(colorForName("Ada"), colorForName("Ada"));
   assert.notDeepEqual(colorForName("Ada"), colorForName("Ben"));
 });

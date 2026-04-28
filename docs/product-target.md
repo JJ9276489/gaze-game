@@ -14,7 +14,7 @@ personal model into a room hangout for Solo or Multiplayer enemy waves.
 4. User chooses `Dojo`, `Join room`, or `Create room`.
 5. `Dojo` starts a local camera session for calibration, sample collection, and fitting a
    personal adapter without joining the relay.
-6. `Create room` shows a short code like `K7M-4QX`.
+6. `Create room` shows a shareable code like `K7M4-QX8P-2N6A`.
 7. Another user enters that room code and clicks `Join room`.
 8. Users can click `Solo` for local waves or `Multiplayer` for synchronized room-visible
    waves.
@@ -65,10 +65,12 @@ Private-network relays are acceptable for alpha testing, not consumer distributi
 
 The relay should enforce:
 
-- room-code authorization
+- high-entropy room-code bearer tokens for private rooms
 - message-size limits
 - per-client rate limits
 - max clients per room
+- server-generated multiplayer waves
+- server-side score validation
 - idle timeout cleanup
 - TLS termination through the hosting platform or reverse proxy
 
@@ -83,7 +85,7 @@ Allowed:
 - cursor color
 - normalized cursor coordinates
 - tracking status
-- multiplayer wave seed, target coordinates, and score updates
+- multiplayer wave seed, server-generated target coordinates, and validated score updates
 - timestamps and sequence counters
 
 Not allowed:

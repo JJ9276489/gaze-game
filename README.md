@@ -24,13 +24,15 @@ and players opt into game runs when they are ready:
 - `scripts/export_browser_onnx.py` exports the local PyTorch gaze checkpoint for browser
   inference.
 - `scripts/verify_browser_onnx.py` checks ONNX output against the PyTorch model.
+- `scripts/vendor_browser_runtime.py` pins MediaPipe and ONNX Runtime Web assets under
+  `web/vendor/` so the deployed app is not loading runtime code from public CDNs.
 
 ## Privacy Boundary
 
 The relay receives only cursor-level state (room code, name, normalized coordinates,
-tracking, timestamps, wave seeds/scores). Webcam frames, eye crops, face landmarks,
-MediaPipe outputs, model tensors, checkpoints, and personal training samples stay on the
-user's device. See
+tracking, timestamps, server-generated wave targets, and validated score events). Webcam
+frames, eye crops, face landmarks, MediaPipe outputs, model tensors, checkpoints, and
+personal training samples stay on the user's device. See
 [docs/product-target.md#data-sent-over-the-network](docs/product-target.md#data-sent-over-the-network)
 for the authoritative list.
 
@@ -47,7 +49,17 @@ python -m pip install -r requirements-relay.txt  # relay-only host
 python -m pip install -r requirements-dev.txt    # also gets ONNX export/verify
 ```
 
-## Model Assets
+## Browser Runtime And Model Assets
+
+Vendor the browser runtime assets before local or remote browser testing:
+
+```bash
+python scripts/vendor_browser_runtime.py
+```
+
+This writes pinned MediaPipe, face landmarker, and ONNX Runtime Web files into
+`web/vendor/`. The browser serves those files from the relay origin. `web/vendor/` is
+generated and ignored by git.
 
 Model files are ignored by git; generate or copy them onto the relay machine before
 testing gaze inference. If no ONNX model loads, the browser falls back to a heuristic
@@ -67,10 +79,14 @@ python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-Local PyTorch checkpoint used by export/verify:
+The browser-selectable model manifest is `config/browser_models.json`. Running the
+commands above exports and verifies every configured browser model by default.
+
+Local PyTorch checkpoints used by export/verify:
 
 ```text
 models/vision_gaze_spatial_geom.pt
+models/vision_gaze_latest.pt
 ```
 
 ## Local Run
@@ -122,9 +138,10 @@ tailscale serve --bg 8765
 Send testers the generated `https://...ts.net` URL and a room code. Browser camera access
 requires HTTPS for remote pages.
 
-Do not expose the included unauthenticated relay to the public internet. Before public
-testing, add authentication, rate limits, idle cleanup, structured logs, and operator
-controls.
+Do not expose the included relay to the public internet. It has high-entropy room codes,
+message limits, basic per-client rate limits, server-generated waves, and server-side
+score validation, but it is still a private-alpha relay without accounts, abuse controls,
+or production observability.
 
 ## Docs
 

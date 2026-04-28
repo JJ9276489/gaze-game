@@ -25,12 +25,14 @@ For a local multi-user smoke test, open a second tab, join the same room, and en
 
 The room itself is a hangout. Dojo is a separate local training context, Solo is a local
 room run, and Multiplayer starts a room-visible wave. The relay stores one active wave
-per room, broadcasts `wave_start` to everyone in that room, includes the active wave in
-`welcome` for late joiners, and broadcasts sanitized `wave_score` updates after clients
-send `wave_hit`.
+per room, generates the multiplayer target list, broadcasts `wave_start` to everyone in
+that room, includes the active wave in `welcome` for late joiners, and broadcasts
+server-incremented `wave_score` updates after validating `wave_hit` against target order
+and the client's recent cursor position.
 
-The alpha relay also caps websocket message size and room occupancy. It is still not a
-public matchmaking or anti-cheat server.
+The alpha relay also caps websocket message size, room occupancy, and per-client message
+rates. Generated room codes are high-entropy bearer tokens. It is still not a public
+matchmaking or anti-cheat server.
 
 ## Private Alpha Deployment
 
@@ -47,9 +49,10 @@ tailscale serve --bg 8765
 ```
 
 Testers open the generated `https://...ts.net` URL. Browser camera access requires HTTPS
-for remote pages. The relay machine must have the ignored
-`web/models/*.onnx` assets needed for browser model inference. Generate and verify those
-assets on a development machine with `requirements-dev.txt`, then sync them to the relay.
+for remote pages. The relay machine must have both `web/vendor/` runtime assets and the
+ignored `web/models/*.onnx` assets needed for browser model inference. Generate, vendor,
+and verify those assets on a development machine with `requirements-dev.txt`, then sync
+them to the relay.
 
 For the current Prometheus LAN relay:
 
@@ -73,11 +76,10 @@ The included relay is intentionally minimal. Before exposing it on the public in
 add:
 
 - TLS, usually by terminating `wss://` at a reverse proxy or hosting platform
-- room-code authorization
-- per-client rate limits
+- account or invite authorization beyond room-code bearer tokens
 - idle timeout cleanup
 - structured logs and basic metrics
-- authoritative wave scoring or explicit anti-cheat boundaries
+- stronger authoritative scoring or explicit anti-cheat boundaries
 - abuse reporting or operator controls
 - explicit data-collection consent before accepting webcam-derived training data
 

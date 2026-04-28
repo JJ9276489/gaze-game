@@ -1,15 +1,18 @@
 import unittest
 
-from shared_gaze.protocol import clamp01, decode, encode
+from shared_gaze.protocol import clamp01, decode, encode, now_ms
 from shared_gaze.relay_server import (
     MAX_CLIENTS_PER_ROOM,
     MAX_WAVE_DURATION_MS,
     RelayClient,
     RelayState,
+    WAVE_TARGET_COUNT,
     clean_duration_ms,
     clean_name,
     clean_room,
     clean_wave_targets,
+    is_rate_limited,
+    make_wave_targets,
 )
 
 
@@ -78,22 +81,43 @@ class RelayStateTests(unittest.TestCase):
         self.assertEqual(reused["id"], wave_a["id"])
         self.assertNotEqual(wave_a["id"], wave_b["id"])
         self.assertEqual(wave_a["duration_ms"], MAX_WAVE_DURATION_MS)
-        self.assertEqual(wave_a["targets"], [{"id": "t1", "x": 0.0, "y": 1.0}])
+        self.assertEqual(len(wave_a["targets"]), WAVE_TARGET_COUNT)
+        self.assertEqual(wave_a["targets"], make_wave_targets("seed-a"))
 
-    def test_wave_score_updates_are_sanitized(self) -> None:
+    def test_wave_score_updates_are_server_validated(self) -> None:
         state = RelayState()
         client = RelayClient(id="client-a", websocket=None, name="Ada", color=(1, 2, 3))
         state.join_room(client, "ROOM")
         wave = state.start_wave("ROOM", client, {"seed": "seed"})
+        first_target = wave["targets"][0]
+        second_target = wave["targets"][1]
 
-        score = state.update_wave_score("ROOM", client, wave["id"], 10000, "target-a")
+        client.last_cursor = (first_target["x"], first_target["y"])
+        client.last_cursor_at = now_ms()
+        score = state.update_wave_score("ROOM", client, wave["id"], first_target["id"])
 
         self.assertIsNotNone(score)
-        self.assertEqual(score["score"], 9999)
+        self.assertEqual(score["score"], 1)
         self.assertEqual(score["name"], "Ada")
         self.assertEqual(score["color"], [1, 2, 3])
-        self.assertEqual(score["target_id"], "target-a")
-        self.assertIsNone(state.update_wave_score("ROOM", client, "wrong-wave", 10, "target-a"))
+        self.assertEqual(score["target_id"], first_target["id"])
+        self.assertIsNone(state.update_wave_score("ROOM", client, wave["id"], first_target["id"]))
+
+        client.last_cursor = (second_target["x"], second_target["y"])
+        client.last_cursor_at = now_ms()
+        score = state.update_wave_score("ROOM", client, wave["id"], second_target["id"])
+        self.assertIsNotNone(score)
+        self.assertEqual(score["score"], 2)
+        self.assertIsNone(state.update_wave_score("ROOM", client, "wrong-wave", "enemy-2"))
+
+    def test_rate_limiter_bounds_repeated_messages(self) -> None:
+        client = RelayClient(id="client-a", websocket=None)
+
+        self.assertFalse(is_rate_limited(client, "wave_start", timestamp_ms=1000))
+        self.assertFalse(is_rate_limited(client, "wave_start", timestamp_ms=1001))
+        self.assertFalse(is_rate_limited(client, "wave_start", timestamp_ms=1002))
+        self.assertTrue(is_rate_limited(client, "wave_start", timestamp_ms=1003))
+        self.assertFalse(is_rate_limited(client, "wave_start", timestamp_ms=11_003))
 
     def test_cleaners_bound_user_supplied_payloads(self) -> None:
         self.assertEqual(

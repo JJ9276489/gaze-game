@@ -1,13 +1,10 @@
 import { buildPersonalFeatureVector } from "./personal_model.js";
 
-const TASKS_VERSION = "0.10.34";
-const TASKS_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}`;
-const WASM_URL = `${TASKS_URL}/wasm`;
-const FACE_MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-const ORT_VERSION = "1.24.3";
-const ORT_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.wasm.min.mjs`;
-const ORT_WASM_PATH = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const TASKS_URL = "./vendor/mediapipe/tasks-vision/vision_bundle.mjs";
+const WASM_URL = "./vendor/mediapipe/tasks-vision/wasm";
+const FACE_MODEL_URL = "./vendor/mediapipe/models/face_landmarker.task";
+const ORT_URL = "./vendor/onnxruntime/ort.wasm.min.mjs";
+const ORT_WASM_PATH = "./vendor/onnxruntime/";
 const USE_BROWSER_HEAD_POSE_FEATURES = true;
 
 const EYE_CROP_WIDTH = 96;

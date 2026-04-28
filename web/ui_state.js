@@ -12,17 +12,19 @@ export function normalizeRoom(value) {
   if (compact.length === 6) {
     return `${compact.slice(0, 3)}-${compact.slice(3)}`;
   }
+  if (compact.length === 12) {
+    return `${compact.slice(0, 4)}-${compact.slice(4, 8)}-${compact.slice(8)}`;
+  }
   return compact;
 }
 
 export function generateRoomCode(random = Math.random) {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  let prefix = "";
-  for (let index = 0; index < 3; index += 1) {
-    prefix += letters[Math.floor(random() * letters.length)];
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let index = 0; index < 12; index += 1) {
+    code += alphabet[Math.floor(random() * alphabet.length)];
   }
-  const suffix = String(Math.floor(random() * 1000)).padStart(3, "0");
-  return `${prefix}-${suffix}`;
+  return normalizeRoom(code);
 }
 
 export function colorForName(name) {

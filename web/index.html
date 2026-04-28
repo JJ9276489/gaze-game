@@ -100,6 +100,8 @@
               aria-expanded="true"
               aria-pressed="false"
             >Hide buttons</button>
+            <button id="debugButton" class="quiet-action" type="button" aria-controls="debugPanel" aria-expanded="false" aria-pressed="false">Debug</button>
+            <button id="exportDebugButton" class="quiet-action" type="button">Export log</button>
           </div>
           <div id="hudActionButtons" class="hud-actions">
             <button id="trainButton" class="primary-action" type="button">Dojo</button>
@@ -110,6 +112,9 @@
             <button id="leaveButton" class="quiet-action" type="button">Leave</button>
           </div>
         </div>
+        <section id="debugPanel" class="debug-panel hidden" aria-label="Debug metrics">
+          <dl id="debugMetrics" class="debug-grid"></dl>
+        </section>
       </section>
 
       <section id="calibrationOverlay" class="calibration hidden" aria-live="polite">

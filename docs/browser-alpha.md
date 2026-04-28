@@ -13,13 +13,27 @@ play uses Solo or Multiplayer enemy waves as gaze targets.
 - ONNX-exported gaze checkpoint inference
 - five-point fullscreen calibration with saved local browser state
 - browser-local personal NN adapter training
+- live debug metrics and JSON log export for remote tester reports
 - timed Solo and Multiplayer target competition
 - hangout rooms with opt-in game waves
 - synchronized multiplayer enemy waves with room-visible scores
+- server-generated multiplayer targets with server-side score increments
+- pinned browser runtime assets served from the relay origin
 - heuristic fallback if the ONNX model asset is missing
 - mouse mode when camera gaze is unavailable
 
-## Model Asset
+## Runtime And Model Assets
+
+Vendor the browser runtime before local or remote testing:
+
+```bash
+source .venv/bin/activate
+python scripts/vendor_browser_runtime.py
+```
+
+This places pinned MediaPipe, face landmarker, and ONNX Runtime Web assets under
+`web/vendor/`. Testers' browsers load those runtime files from the relay origin, not from
+public CDNs. `web/vendor/` is generated and ignored by git.
 
 The browser client loads:
 
@@ -37,9 +51,10 @@ python scripts/export_browser_onnx.py
 python scripts/verify_browser_onnx.py
 ```
 
-ONNX files are ignored by git because they are derived from local checkpoints. Put the
-needed model files on the private relay machine with the web client, but do not commit
-them to the public repo.
+The model list and checkpoint paths live in `config/browser_models.json`. ONNX files are
+ignored by git because they are derived from local checkpoints. Put the needed model files
+on the private relay machine with the web client, but do not commit them to the public
+repo.
 
 ## Local Test
 
@@ -102,6 +117,10 @@ a Tailscale share for the relay machine.
 See [alpha-tester-guide.md](alpha-tester-guide.md) for the tester-facing join and play
 steps.
 
+When a remote tester reports bad gaze quality, ask them to click `Debug`, then
+`Export log`, and send the downloaded JSON. The log contains runtime/model/cursor timing
+state and recent normalized gaze samples, not webcam frames or the actual room code.
+
 ## Multi-User Behavior
 
 Rooms share cursor state only. Calibration and Dojo are per-user browser runs. One user
@@ -113,9 +132,10 @@ room.
 across the room; see [relay-operations.md](relay-operations.md#local-development) for the
 relay-side `wave_start` / `wave_hit` / `wave_score` behavior.
 
-The current relay is not an authoritative anti-cheat game server. It trusts client score
-events and should stay private until room auth, rate limits, and authoritative scoring are
-designed.
+The current relay generates multiplayer targets, rate-limits noisy messages, and ignores
+client score totals. It validates each hit against the expected target order and the
+client's recent cursor position, then increments the score server-side. This is enough for
+private alpha testing, but it is still not a public anti-cheat or matchmaking server.
 
 ## Screen Controls
 
